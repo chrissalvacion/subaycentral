@@ -19,7 +19,6 @@ const fallbackPrograms = [
 export default function LoginPage() {
   const router = useRouter();
   const supabase = createClient();
-  const isSqliteMode = process.env.NEXT_PUBLIC_DEV_DB === "sqlite";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -129,36 +128,6 @@ export default function LoginPage() {
 
     if (!fullName) {
       setRegisterError("Please provide your first name and last name.");
-      setRegisterLoading(false);
-      return;
-    }
-
-    if (isSqliteMode) {
-      const { error: createError } = await supabase.from("profiles").insert([
-        {
-          full_name: fullName,
-          first_name: firstName.trim(),
-          middle_name: middleName.trim() || null,
-          last_name: lastName.trim(),
-          program,
-          section: section.trim(),
-          phone: contactNumber.trim(),
-          email: normalizedEmail,
-          role: "intern",
-          student_id: studentId.trim(),
-          password: registerPassword,
-        },
-      ]);
-
-      if (createError) {
-        setRegisterError(createError.message);
-        setRegisterLoading(false);
-        return;
-      }
-
-      setEmail(normalizedEmail);
-      setPassword(registerPassword);
-      setRegisterSuccess("Account created. You can now sign in.");
       setRegisterLoading(false);
       return;
     }

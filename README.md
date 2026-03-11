@@ -2,7 +2,7 @@
 
 SubayCentral is an OJT Daily Accomplishment and Time Monitoring System built with Next.js, React, Tailwind CSS, and Supabase.
 
-For local development, the project supports SQLite-first mode so you can run without setting up Supabase first.
+Supabase is the primary database for local and production environments.
 
 ## Core Features
 
@@ -39,12 +39,12 @@ For local development, the project supports SQLite-first mode so you can run wit
 - Next.js 16 App Router
 - React 19
 - Tailwind CSS 4
-- SQLite (local development mode)
+- Supabase Auth + Postgres + RLS
 - Supabase Auth + Postgres + RLS (production mode)
 - Recharts for faculty reporting
 - Vercel for hosting
 
-## Local Setup (SQLite-first)
+## Local Setup (Supabase primary)
 
 1. Install dependencies:
 
@@ -58,45 +58,30 @@ npm install
 copy .env.local.example .env.local
 ```
 
-3. Start local SQLite mode:
-
-```bash
-npm run dev:sqlite
-```
-
-SQLite mode creates and seeds `dev.sqlite` automatically.
-
-Demo login accounts (password for all: `password123`):
-
-- `admin@subaycentral.local`
-- `faculty@subaycentral.local`
-- `intern@subaycentral.local`
-
-4. Open `http://localhost:3000`
-
-## Local Setup (Supabase mode)
-
-If you want to use Supabase locally instead of SQLite:
-
-1. Set these values in `.env.local`:
+3. Set these values in `.env.local`:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 
-2. Remove or comment out:
-
-- `DEV_DB=sqlite`
-- `NEXT_PUBLIC_DEV_DB=sqlite`
-
-3. Run schema in Supabase SQL Editor:
+4. Run schema in Supabase SQL Editor:
 
 - `supabase/schema.sql`
 
-4. Start dev server:
+5. Start dev server:
 
 ```bash
 npm run dev
+```
+
+6. Open `http://localhost:3000`
+
+## Optional SQLite Fallback (legacy)
+
+If you still need the legacy SQLite development mode, run:
+
+```bash
+npm run dev:sqlite
 ```
 
 ## Deployment on Vercel

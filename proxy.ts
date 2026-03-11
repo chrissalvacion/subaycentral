@@ -2,11 +2,6 @@ import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 
 export async function proxy(request: NextRequest) {
-  if (process.env.DEV_DB === "sqlite") {
-    // In local SQLite mode, auth is handled by the client-side dev adapter.
-    return NextResponse.next({ request });
-  }
-
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
