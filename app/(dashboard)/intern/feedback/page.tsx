@@ -6,13 +6,16 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Feedback } from "@/lib/types";
 import { Card } from "@/components/ui/Card";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { Button } from "@/components/ui/Button";
 import { formatDate } from "@/lib/utils";
+import { Check } from "lucide-react";
 
 export default function InternFeedbackPage() {
   const supabase = createClient();
   const { profile } = useAuth();
   const [feedback, setFeedback] = useState<Feedback[]>([]);
   const [loading, setLoading] = useState(true);
+  const [acknowledging, setAcknowledging] = useState<string | null>(null);
 
   useEffect(() => {
     if (!profile) return;
@@ -42,6 +45,29 @@ export default function InternFeedbackPage() {
     load();
   }, [profile, supabase]);
 
+  const handleAcknowledge = async (feedbackId: string, currentReadAt: string | null) => {
+    setAcknowledging(feedbackId);
+    try {
+      const newReadAt = currentReadAt ? null : new Date().toISOString();
+      const { error } = await supabase
+        .from("feedback")
+        .update({ intern_read_at: newReadAt })
+        .eq("id", feedbackId);
+
+      if (error) throw error;
+
+      setFeedback((prev) =>
+        prev.map((item) => 
+          item.id === feedbackId ? { ...item, intern_read_at: newReadAt } : item
+        )
+      );
+    } catch (err) {
+      console.error("Failed to toggle acknowledgement:", err);
+    } finally {
+      setAcknowledging(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -58,13 +84,22 @@ export default function InternFeedbackPage() {
           {feedback.map((item) => (
             <Card key={item.id}>
               <div className="flex items-start justify-between gap-3">
-                <div>
+                <div className="flex-1">
                   <p className="font-semibold text-slate-900">{item.profiles?.full_name ?? "Faculty"}</p>
                   <p className="text-xs text-slate-400">{formatDate(item.created_at)}</p>
                 </div>
-                <div className="text-sm font-medium text-indigo-600">
-                  {item.performance_rating ? `${item.performance_rating}/5` : "No rating"}
-                </div>
+                <button
+                  onClick={() => handleAcknowledge(item.id, item.intern_read_at)}
+                  disabled={acknowledging === item.id}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all ${
+                    item.intern_read_at
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  } disabled:opacity-50`}
+                >
+                  <Check size={14} />
+                  {item.intern_read_at ? "Read" : "Mark as Read"}
+                </button>
               </div>
               <p className="text-slate-700 mt-3 whitespace-pre-line">{item.content}</p>
             </Card>

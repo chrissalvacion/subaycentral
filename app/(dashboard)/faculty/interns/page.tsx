@@ -1,27 +1,33 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Profile, InternDeployment, PartnerAgency, DailyRecord, TimeRecord, Feedback } from "@/lib/types";
+import { Profile, InternDeployment, PartnerAgency } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
-import { Textarea } from "@/components/ui/Textarea";
+import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { InternStatusBadge } from "@/components/ui/Badge";
-import { formatDate, formatTime, formatHours } from "@/lib/utils";
-import { Search, Building2, MessageSquare, Eye } from "lucide-react";
+import { calculateExpectedEndDate, formatDate, formatHours } from "@/lib/utils";
+import { Search, Eye, Pencil } from "lucide-react";
 
-type InternRow = InternDeployment & {
+type InternDeploymentRow = InternDeployment & {
   profiles?: Profile;
   partner_agencies?: PartnerAgency;
 };
 
-type DetailData = {
-  dailyRecords: DailyRecord[];
-  timeRecords: TimeRecord[];
-  feedback: Feedback[];
+type InternRow = {
+  intern: Profile;
+  deployment: InternDeploymentRow | null;
+};
+
+type EditDeploymentForm = {
+  agencyId: string;
+  startDate: string;
+  status: string;
 };
 
 export default function FacultyInternsPage() {
@@ -32,114 +38,122 @@ export default function FacultyInternsPage() {
   const [agencies, setAgencies] = useState<PartnerAgency[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [selectedIntern, setSelectedIntern] = useState<InternRow | null>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [detailData, setDetailData] = useState<DetailData>({
-    dailyRecords: [],
-    timeRecords: [],
-    feedback: [],
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingIntern, setEditingIntern] = useState<InternRow | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editAgencySearch, setEditAgencySearch] = useState("");
+  const [editForm, setEditForm] = useState<EditDeploymentForm>({
+    agencyId: "",
+    startDate: "",
+    status: "pending",
   });
-  const [feedbackText, setFeedbackText] = useState("");
-  const [feedbackRating, setFeedbackRating] = useState("5");
-  const [savingFeedback, setSavingFeedback] = useState(false);
 
   const load = useCallback(async () => {
     if (!profile) return;
     const currentProfile = profile;
     setLoading(true);
 
-    const { data: depFac } = await supabase
-      .from("deployment_faculty")
-      .select("deployment_id")
-      .eq("faculty_id", currentProfile.id);
-    const deploymentIds =
-      ((depFac as { deployment_id: string }[] | null) ?? []).map(
-        (d) => d.deployment_id
-      );
-
-    if (deploymentIds.length === 0) {
+    if (!currentProfile.program || !currentProfile.section) {
       setInterns([]);
       setLoading(false);
       return;
     }
 
-    const [{ data: internDeps }, { data: agencyList }] = await Promise.all([
+    const [{ data: internProfiles }, { data: internDeps }, { data: agencyList }] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("*")
+        .eq("role", "intern")
+        .eq("program", currentProfile.program)
+        .eq("section", currentProfile.section)
+        .order("full_name", { ascending: true }),
       supabase
         .from("intern_deployments")
         .select("*, profiles(*), partner_agencies(*)")
-        .in("deployment_id", deploymentIds)
         .order("created_at", { ascending: false }),
       supabase.from("partner_agencies").select("*").order("name"),
     ]);
 
-    setInterns((internDeps as InternRow[]) ?? []);
+    const scopedProfiles = (internProfiles as Profile[]) ?? [];
+    const scopedInternIds = new Set(scopedProfiles.map((intern) => intern.id));
+    const scopedDeployments = ((internDeps as InternDeploymentRow[]) ?? []).filter((deployment) =>
+      scopedInternIds.has(deployment.intern_id)
+    );
+
+    const latestDeploymentByIntern = new Map<string, InternDeploymentRow>();
+    for (const deployment of scopedDeployments) {
+      if (!latestDeploymentByIntern.has(deployment.intern_id)) {
+        latestDeploymentByIntern.set(deployment.intern_id, deployment);
+      }
+    }
+
+    const rows: InternRow[] = scopedProfiles.map((intern) => ({
+      intern,
+      deployment: latestDeploymentByIntern.get(intern.id) ?? null,
+    }));
+
+    setInterns(rows);
     setAgencies((agencyList as PartnerAgency[]) ?? []);
     setLoading(false);
   }, [profile, supabase]);
 
   useEffect(() => { load(); }, [load]);
 
-  async function assignAgency(row: InternRow, agencyId: string) {
+  function openEditDeployment(row: InternRow) {
+    if (!row.deployment) {
+      alert("This intern has no deployment record yet.");
+      return;
+    }
+
+    setEditingIntern(row);
+    setEditAgencySearch(row.deployment.partner_agencies?.name ?? "");
+    setEditForm({
+      agencyId: row.deployment.agency_id ?? "",
+      startDate: row.deployment.start_date ? row.deployment.start_date.slice(0, 10) : "",
+      status: row.deployment.status,
+    });
+    setEditOpen(true);
+  }
+
+  async function saveDeploymentDetails() {
+    if (!editingIntern?.deployment) return;
+    setSavingEdit(true);
+
+    const dutyHoursPerDay = editingIntern.intern.duty_hours_per_day ?? 8;
+    const expectedEndDate = calculateExpectedEndDate(
+      editForm.startDate || null,
+      editingIntern.deployment.required_hours,
+      editingIntern.deployment.rendered_hours,
+      dutyHoursPerDay
+    );
+
     const { error } = await supabase
       .from("intern_deployments")
-      .update({ agency_id: agencyId || null, status: "active" })
-      .eq("id", row.id);
-    if (error) alert(error.message);
-    else await load();
-  }
+      .update({
+        agency_id: editForm.agencyId || null,
+        start_date: editForm.startDate || null,
+        expected_end_date: expectedEndDate,
+        status: editForm.status as InternDeployment["status"],
+      })
+      .eq("id", editingIntern.deployment.id);
 
-  async function openDetails(row: InternRow) {
-    setSelectedIntern(row);
-    setDetailOpen(true);
-    const [{ data: daily }, { data: time }, { data: fb }] = await Promise.all([
-      supabase
-        .from("daily_records")
-        .select("*")
-        .eq("intern_deployment_id", row.id)
-        .order("date", { ascending: false }),
-      supabase
-        .from("time_records")
-        .select("*")
-        .eq("intern_deployment_id", row.id)
-        .order("date", { ascending: false }),
-      supabase
-        .from("feedback")
-        .select("*, profiles!feedback_faculty_id_fkey(*)")
-        .eq("intern_deployment_id", row.id)
-        .order("created_at", { ascending: false }),
-    ]);
-    setDetailData({
-      dailyRecords: (daily as DailyRecord[]) ?? [],
-      timeRecords: (time as TimeRecord[]) ?? [],
-      feedback: (fb as Feedback[]) ?? [],
-    });
-  }
-
-  async function submitFeedback() {
-    if (!selectedIntern || !profile || !feedbackText.trim()) return;
-    const currentProfile = profile;
-    setSavingFeedback(true);
-    const { error } = await supabase.from("feedback").insert({
-      faculty_id: currentProfile.id,
-      intern_id: selectedIntern.intern_id,
-      intern_deployment_id: selectedIntern.id,
-      content: feedbackText,
-      performance_rating: parseInt(feedbackRating, 10),
-    });
-    if (error) alert(error.message);
-    else {
-      setFeedbackText("");
-      setFeedbackRating("5");
-      await openDetails(selectedIntern);
+    if (error) {
+      alert(error.message);
+      setSavingEdit(false);
+      return;
     }
-    setSavingFeedback(false);
+
+    setEditOpen(false);
+    setEditingIntern(null);
+    setSavingEdit(false);
+    await load();
   }
 
   const filtered = interns.filter((row) => {
     const q = search.toLowerCase();
     return (
-      row.profiles?.full_name?.toLowerCase().includes(q) ||
-      row.profiles?.email?.toLowerCase().includes(q)
+      row.intern.full_name?.toLowerCase().includes(q) ||
+      row.intern.email?.toLowerCase().includes(q)
     );
   });
 
@@ -148,11 +162,36 @@ export default function FacultyInternsPage() {
     ...agencies.map((a) => ({ value: a.id, label: a.name })),
   ];
 
+  const editAgencySuggestions = agencies
+    .filter((agency) =>
+      agency.name.toLowerCase().includes(editAgencySearch.trim().toLowerCase())
+    )
+    .map((agency) => agency.name);
+
+  const statusOptions = [
+    { value: "pending", label: "Pending" },
+    { value: "active", label: "Active" },
+    { value: "completed", label: "Completed" },
+    { value: "withdrawn", label: "Withdrawn" },
+  ];
+
+  const computedExpectedEndDate = useMemo(() => {
+    if (!editingIntern?.deployment) return "";
+    return (
+      calculateExpectedEndDate(
+        editForm.startDate || null,
+        editingIntern.deployment.required_hours,
+        editingIntern.deployment.rendered_hours,
+        editingIntern.intern.duty_hours_per_day ?? 8
+      ) ?? ""
+    );
+  }, [editForm.startDate, editingIntern]);
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Assigned Interns</h1>
-        <p className="text-slate-500 text-sm">View, assign, and evaluate your interns</p>
+        <h1 className="text-2xl font-bold text-slate-900">Interns</h1>
+        <p className="text-slate-500 text-sm">All interns in your assigned program and section</p>
       </div>
 
       <div className="relative max-w-md">
@@ -170,45 +209,95 @@ export default function FacultyInternsPage() {
         {loading ? (
           <div className="p-10 flex justify-center"><LoadingSpinner /></div>
         ) : filtered.length === 0 ? (
-          <div className="p-10 text-center text-slate-400 text-sm">No interns assigned.</div>
+          <div className="p-10 text-center text-slate-400 text-sm">No interns found for your program and section.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50">
                   <th className="text-left px-4 py-3 font-semibold text-slate-600">Intern</th>
-                  <th className="text-left px-4 py-3 font-semibold text-slate-600 hidden md:table-cell">Agency</th>
+                  <th className="text-left px-4 py-3 font-semibold text-slate-600">Agency</th>
+                  <th className="text-left px-4 py-3 font-semibold text-slate-600 hidden lg:table-cell">Agency Address</th>
                   <th className="text-left px-4 py-3 font-semibold text-slate-600 hidden lg:table-cell">Start / End</th>
+                  <th className="text-left px-4 py-3 font-semibold text-slate-600 min-w-[220px]">Progress</th>
                   <th className="text-left px-4 py-3 font-semibold text-slate-600">Status</th>
                   <th className="text-right px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {filtered.map((row) => (
-                  <tr key={row.id} className="hover:bg-slate-50 transition-colors align-top">
+                  <tr key={row.intern.id} className="hover:bg-slate-50 transition-colors align-top">
                     <td className="px-4 py-3">
-                      <p className="font-medium text-slate-900">{row.profiles?.full_name}</p>
-                      <p className="text-slate-500 text-xs">{row.profiles?.email}</p>
-                      <p className="text-slate-400 text-xs md:hidden mt-1">{row.partner_agencies?.name ?? "No agency"}</p>
+                      <p className="font-medium text-slate-900">{row.intern.full_name}</p>
+                      <p className="text-slate-500 text-xs">{row.intern.email}</p>
                     </td>
-                    <td className="px-4 py-3 hidden md:table-cell min-w-[220px]">
-                      <Select
-                        options={agencyOptions}
-                        value={row.agency_id ?? ""}
-                        onChange={(e) => assignAgency(row, e.target.value)}
-                      />
+                    <td className="px-4 py-3 min-w-[220px] text-slate-600">
+                      {row.deployment?.partner_agencies?.name ?? "No agency"}
                     </td>
                     <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">
-                      <div>{formatDate(row.start_date)}</div>
-                      <div>{formatDate(row.expected_end_date)}</div>
+                      {row.deployment?.partner_agencies?.address ?? "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">
+                      <div>{formatDate(row.deployment?.start_date ?? null)}</div>
+                      <div>{formatDate(row.deployment?.expected_end_date ?? null)}</div>
                     </td>
                     <td className="px-4 py-3">
-                      <InternStatusBadge status={row.status} />
+                      {row.deployment ? (
+                        <div className="space-y-1">
+                          <p className="text-xs text-slate-600">
+                            {formatHours(row.deployment.rendered_hours)} / {formatHours(row.deployment.required_hours ?? 0)}
+                          </p>
+                          <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden">
+                            <div
+                              className="h-full bg-indigo-600 rounded-full"
+                              style={{
+                                width: `${Math.min(
+                                  100,
+                                  Math.max(
+                                    0,
+                                    row.deployment.required_hours && row.deployment.required_hours > 0
+                                      ? (row.deployment.rendered_hours / row.deployment.required_hours) * 100
+                                      : 0
+                                  )
+                                )}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 text-xs">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {row.deployment ? (
+                        <InternStatusBadge status={row.deployment.status} />
+                      ) : (
+                        <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium bg-slate-100 text-slate-600">
+                          No Deployment
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">
-                        <Button size="sm" variant="ghost" icon={<Building2 size={14} />} className="md:hidden" onClick={() => assignAgency(row, row.agency_id ?? "")}>Agency</Button>
-                        <Button size="sm" variant="ghost" icon={<Eye size={14} />} onClick={() => openDetails(row)}>View</Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon={<Pencil size={14} />}
+                          onClick={() => openEditDeployment(row)}
+                          disabled={!row.deployment}
+                          title="Edit deployment"
+                          aria-label="Edit deployment"
+                        >
+                        </Button>
+                        <Link href={`/faculty/interns/${row.intern.id}`}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={<Eye size={14} />}
+                            title="View intern details"
+                            aria-label="View intern details"
+                          />
+                        </Link>
                       </div>
                     </td>
                   </tr>
@@ -219,85 +308,59 @@ export default function FacultyInternsPage() {
         )}
       </div>
 
-      <Modal open={detailOpen} onClose={() => setDetailOpen(false)} title={selectedIntern?.profiles?.full_name ?? "Intern Details"} maxWidth="xl">
-        {selectedIntern && (
-          <div className="space-y-6 text-sm">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded-lg bg-slate-50 p-4">
-                <p className="text-slate-400 text-xs uppercase tracking-wide mb-2">Profile</p>
-                <p><span className="text-slate-500">Email:</span> {selectedIntern.profiles?.email}</p>
-                <p><span className="text-slate-500">Start Date:</span> {formatDate(selectedIntern.start_date)}</p>
-                <p><span className="text-slate-500">Expected End:</span> {formatDate(selectedIntern.expected_end_date)}</p>
-                <p><span className="text-slate-500">Agency:</span> {selectedIntern.partner_agencies?.name ?? "—"}</p>
-                <p><span className="text-slate-500">Rendered Hours:</span> {formatHours(selectedIntern.rendered_hours)}</p>
-              </div>
-              <div className="rounded-lg bg-slate-50 p-4">
-                <p className="text-slate-400 text-xs uppercase tracking-wide mb-2">Add Feedback</p>
-                <div className="space-y-3">
-                  <Select label="Performance Rating" value={feedbackRating} onChange={(e) => setFeedbackRating(e.target.value)} options={[1,2,3,4,5].map((n) => ({ value: String(n), label: `${n} / 5` }))} />
-                  <Textarea label="Feedback" value={feedbackText} onChange={(e) => setFeedbackText(e.target.value)} rows={4} placeholder="Write your feedback for the intern..." />
-                  <div className="flex justify-end">
-                    <Button icon={<MessageSquare size={14} />} loading={savingFeedback} onClick={submitFeedback}>Submit Feedback</Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <h3 className="font-semibold text-slate-900 mb-2">Daily Records</h3>
-              {detailData.dailyRecords.length === 0 ? (
-                <p className="text-slate-400">No daily records yet.</p>
-              ) : (
-                <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
-                  {detailData.dailyRecords.map((r) => (
-                    <div key={r.id} className="px-4 py-3">
-                      <p className="font-medium text-slate-800">{formatDate(r.date)}</p>
-                      <p className="text-slate-600 whitespace-pre-line mt-1">{r.tasks}</p>
-                      {r.notes && <p className="text-slate-500 mt-1">Notes: {r.notes}</p>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <h3 className="font-semibold text-slate-900 mb-2">Time Logs</h3>
-              {detailData.timeRecords.length === 0 ? (
-                <p className="text-slate-400">No time records yet.</p>
-              ) : (
-                <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
-                  {detailData.timeRecords.map((r) => (
-                    <div key={r.id} className="flex flex-wrap items-center gap-x-6 gap-y-1 px-4 py-3">
-                      <p className="font-medium text-slate-800 min-w-[140px]">{formatDate(r.date)}</p>
-                      <p className="text-slate-600">In: {formatTime(r.time_in)}</p>
-                      <p className="text-slate-600">Out: {formatTime(r.time_out)}</p>
-                      <p className="text-slate-600">Hours: {formatHours(r.total_hours)}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <h3 className="font-semibold text-slate-900 mb-2">Feedback History</h3>
-              {detailData.feedback.length === 0 ? (
-                <p className="text-slate-400">No feedback yet.</p>
-              ) : (
-                <div className="space-y-3">
-                  {detailData.feedback.map((f) => (
-                    <div key={f.id} className="rounded-lg border border-slate-200 p-4 bg-slate-50">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="font-medium text-slate-800">Rating: {f.performance_rating ?? "—"}/5</p>
-                        <p className="text-xs text-slate-400">{formatDate(f.created_at)}</p>
-                      </div>
-                      <p className="text-slate-600 mt-2 whitespace-pre-line">{f.content}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+      <Modal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title={editingIntern ? `Edit Deployment - ${editingIntern.intern.full_name}` : "Edit Deployment"}
+        maxWidth="lg"
+      >
+        <div className="space-y-4">
+          <Input
+            label="Agency"
+            placeholder="Type agency name"
+            value={editAgencySearch}
+            onChange={(event) => {
+              const value = event.target.value;
+              const matchedAgency = agencies.find((agency) => agency.name === value);
+              setEditAgencySearch(value);
+              setEditForm((current) => ({ ...current, agencyId: matchedAgency?.id ?? "" }));
+            }}
+            list="edit-agency-suggestions"
+            helperText="Type to search agency and pick from suggestions."
+          />
+          <datalist id="edit-agency-suggestions">
+            {editAgencySuggestions.map((agencyName) => (
+              <option key={agencyName} value={agencyName} />
+            ))}
+          </datalist>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="Start Date"
+              type="date"
+              value={editForm.startDate}
+              onChange={(event) => setEditForm((current) => ({ ...current, startDate: event.target.value }))}
+            />
+            <Input
+              label="Estimated End Date"
+              type="date"
+              value={computedExpectedEndDate}
+              disabled
+              helperText="Auto-calculated from required/rendered hours and intern duty hours/day."
+            />
           </div>
-        )}
+          <Select
+            label="Status"
+            options={statusOptions}
+            value={editForm.status}
+            onChange={(event) => setEditForm((current) => ({ ...current, status: event.target.value }))}
+          />
+
+          <div className="flex justify-end">
+            <Button onClick={saveDeploymentDetails} loading={savingEdit}>
+              Save Changes
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

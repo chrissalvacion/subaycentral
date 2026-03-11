@@ -5,5 +5,5 @@ export default function InternLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <DashboardLayout>{children}</DashboardLayout>;
+  return <DashboardLayout requiredRole="intern">{children}</DashboardLayout>;
 }

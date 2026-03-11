@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, StatCard } from "@/components/ui/Card";
 import { DeploymentStatusBadge } from "@/components/ui/Badge";
-import { formatDate, formatHours, getProgressPercent } from "@/lib/utils";
+import { calculateExpectedEndDate, formatDate, formatHours, getProgressPercent } from "@/lib/utils";
 import { ClipboardList, Clock, Building2, CalendarDays } from "lucide-react";
 
 type HomeData = {
@@ -43,27 +43,56 @@ export default function InternHomePage() {
         return;
       }
 
-      const [{ count: dailyCount }, { count: timeCount }] = await Promise.all([
+      const [{ count: dailyCount }, timeRecordsResult] = await Promise.all([
         supabase
           .from("daily_records")
           .select("id", { count: "exact", head: true })
           .eq("intern_deployment_id", deployment.id),
         supabase
           .from("time_records")
-          .select("id", { count: "exact", head: true })
+          .select("morning_time_in, morning_time_out, afternoon_time_in, afternoon_time_out, time_in, time_out")
           .eq("intern_deployment_id", deployment.id),
       ]);
+
+      const timeRecords = timeRecordsResult.data ?? [];
+
+      function rangeHours(timeIn: string | null, timeOut: string | null): number {
+        if (!timeIn || !timeOut) return 0;
+        const inDate = new Date(`1970-01-01T${timeIn}:00`);
+        const outDate = new Date(`1970-01-01T${timeOut}:00`);
+        const diffMs = outDate.getTime() - inDate.getTime();
+        return diffMs > 0 ? diffMs / (1000 * 60 * 60) : 0;
+      }
+
+      type TRRow = { morning_time_in: string | null; morning_time_out: string | null; afternoon_time_in: string | null; afternoon_time_out: string | null; time_in: string | null; time_out: string | null };
+      const renderedHours = timeRecords.reduce((sum: number, r: TRRow) => {
+        const morningHours = rangeHours(r.morning_time_in, r.morning_time_out);
+        const afternoonHours = rangeHours(r.afternoon_time_in, r.afternoon_time_out);
+        // Fallback to legacy time_in/time_out if new fields are absent
+        const legacyHours = (morningHours === 0 && afternoonHours === 0)
+          ? rangeHours(r.time_in, r.time_out)
+          : 0;
+        return sum + morningHours + afternoonHours + legacyHours;
+      }, 0);
+
+      const requiredHours = deployment.required_hours ?? deployment.deployments?.required_hours ?? 0;
+      const computedExpectedEndDate = calculateExpectedEndDate(
+        deployment.start_date,
+        requiredHours,
+        renderedHours,
+        currentProfile.duty_hours_per_day ?? 8
+      );
 
       setData({
         deploymentName: deployment.deployments?.name ?? "No Deployment",
         deploymentStatus: deployment.deployments?.status ?? "upcoming",
         agencyName: deployment.partner_agencies?.name ?? null,
         startDate: deployment.start_date,
-        endDate: deployment.expected_end_date,
-        renderedHours: deployment.rendered_hours ?? 0,
-        requiredHours: deployment.required_hours ?? deployment.deployments?.required_hours ?? 0,
+        endDate: computedExpectedEndDate,
+        renderedHours: Number(renderedHours.toFixed(2)),
+        requiredHours,
         dailyCount: dailyCount ?? 0,
-        timeCount: timeCount ?? 0,
+        timeCount: timeRecords.length,
       });
       setLoading(false);
     }
@@ -93,7 +122,7 @@ export default function InternHomePage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Intern Home</h1>
+        <h1 className="text-2xl font-bold text-slate-900">Home</h1>
         <p className="text-slate-500 text-sm">Overview of your current deployment</p>
       </div>
 
@@ -106,7 +135,8 @@ export default function InternHomePage() {
             </div>
             <div className="mt-3 space-y-1 text-sm text-slate-600">
               <p className="flex items-center gap-2"><Building2 size={15} /> {data.agencyName ?? "No agency assigned yet"}</p>
-              <p className="flex items-center gap-2"><CalendarDays size={15} /> {formatDate(data.startDate)} to {formatDate(data.endDate)}</p>
+              <p className="flex items-center gap-2"><CalendarDays size={15} /> Actual Start Date: {formatDate(data.startDate)} - Estimated End Date: {formatDate(data.endDate)}</p>
+              {/* <p className="pl-6">Estimated Finish Date: {formatDate(data.endDate)}</p> */}
             </div>
           </div>
           <div className="w-full md:max-w-xs">

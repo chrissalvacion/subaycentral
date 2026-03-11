@@ -5,5 +5,5 @@ export default function FacultyLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <DashboardLayout>{children}</DashboardLayout>;
+  return <DashboardLayout requiredRole="faculty">{children}</DashboardLayout>;
 }

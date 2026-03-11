@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { UserRole } from "@/lib/types";
 import {
   LayoutDashboard,
   Users,
@@ -18,6 +20,7 @@ import {
   MessageSquare,
   UserCircle,
   Home,
+  ChevronUp,
 } from "lucide-react";
 
 interface NavItem {
@@ -28,23 +31,25 @@ interface NavItem {
 
 const adminNav: NavItem[] = [
   { label: "Dashboard", href: "/admin", icon: <LayoutDashboard size={18} /> },
-  { label: "Accounts", href: "/admin/accounts", icon: <Users size={18} /> },
+  { label: "Deployments", href: "/admin/deployments", icon: <ClipboardList size={18} />,},
+
   { label: "Programs", href: "/admin/programs", icon: <BookOpen size={18} /> },
   {
     label: "Partner Agencies",
     href: "/admin/agencies",
     icon: <Building2 size={18} />,
   },
-  {
-    label: "Deployments",
-    href: "/admin/deployments",
-    icon: <ClipboardList size={18} />,
-  },
+  { label: "Accounts", href: "/admin/accounts", icon: <Users size={18} /> },
   { label: "Settings", href: "/admin/settings", icon: <Settings size={18} /> },
 ];
 
 const facultyNav: NavItem[] = [
   { label: "Dashboard", href: "/faculty", icon: <LayoutDashboard size={18} /> },
+  {
+    label: "Deployments",
+    href: "/faculty/deployments",
+    icon: <ClipboardList size={18} />,
+  },
   {
     label: "My Interns",
     href: "/faculty/interns",
@@ -103,10 +108,10 @@ function NavGroup({ items }: { items: NavItem[] }) {
             key={item.href}
             href={item.href}
             className={[
-              "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+              "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors [&_span]:!text-white [&_svg]:!text-white",
               isActive
-                ? "bg-indigo-600 text-white"
-                : "text-slate-300 hover:bg-slate-700 hover:text-white",
+                ? "bg-indigo-600 !text-white"
+                : "!text-white hover:bg-slate-700 hover:!text-white",
             ].join(" ")}
           >
             {item.icon}
@@ -126,20 +131,37 @@ interface SidebarProps {
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const { profile, signOut } = useAuth();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
-  const navItems =
-    profile?.role === "admin"
-      ? adminNav
-      : profile?.role === "faculty"
-        ? facultyNav
-        : internNav;
+  const navByRole: Record<UserRole, NavItem[]> = {
+    admin: adminNav,
+    faculty: facultyNav,
+    intern: internNav,
+  };
 
-  const roleLabel =
-    profile?.role === "admin"
-      ? "Administrator"
-      : profile?.role === "faculty"
-        ? "Faculty"
-        : "Intern";
+  const roleLabels: Record<UserRole, string> = {
+    admin: "Administrator",
+    faculty: "Faculty",
+    intern: "Intern",
+  };
+
+  const role = profile?.role;
+  const navItems = role ? navByRole[role] : [];
+
+  const roleLabel = role ? roleLabels[role] : "Loading role...";
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+
+    window.addEventListener("mousedown", handleClickOutside);
+    return () => window.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   return (
     <>
@@ -168,24 +190,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               <p className="text-white font-bold text-sm leading-tight">
                 SubayCentral
               </p>
-              <p className="text-slate-400 text-xs">OJT Monitoring</p>
-            </div>
-          </div>
-        </div>
-
-        {/* User info */}
-        <div className="px-5 py-4 border-b border-slate-700">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-sm font-semibold">
-                {profile?.full_name?.[0]?.toUpperCase() ?? "U"}
-              </span>
-            </div>
-            <div className="overflow-hidden">
-              <p className="text-white text-sm font-medium truncate">
-                {profile?.full_name ?? "Loading..."}
-              </p>
-              <p className="text-slate-400 text-xs">{roleLabel}</p>
+              <p className="text-slate-200 text-xs">OJT Monitoring</p>
             </div>
           </div>
         </div>
@@ -195,15 +200,52 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           <NavGroup items={navItems} />
         </div>
 
-        {/* Sign out */}
-        <div className="px-3 py-4 border-t border-slate-700">
-          <button
-            onClick={signOut}
-            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
-          >
-            <LogOut size={18} />
-            Sign Out
-          </button>
+        {/* User menu */}
+        <div className="px-3 py-4 border-t border-slate-700" ref={menuRef}>
+          <div className="relative">
+            <div className="flex items-center gap-3 px-2">
+              <button
+                type="button"
+                onClick={() => setMenuOpen((value) => !value)}
+                className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0 border border-indigo-500 hover:bg-indigo-500 transition-colors"
+                aria-label="Open user menu"
+              >
+                <span className="text-white text-sm font-semibold">
+                  {profile?.full_name?.[0]?.toUpperCase() ?? "U"}
+                </span>
+              </button>
+              <div className="min-w-0 flex-1">
+                <p className="text-white text-sm font-medium truncate">
+                  {profile?.full_name ?? "Loading..."}
+                </p>
+                <p className="text-slate-200 text-xs">{roleLabel}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMenuOpen((value) => !value)}
+                className="p-1.5 rounded-md text-slate-200 hover:text-white hover:bg-slate-700 transition-colors"
+                aria-label="Toggle user menu"
+              >
+                <ChevronUp
+                  size={16}
+                  className={menuOpen ? "rotate-180 transition-transform" : "transition-transform"}
+                />
+              </button>
+            </div>
+
+            {menuOpen && (
+              <div className="absolute bottom-12 left-0 right-0 bg-slate-800 border border-slate-700 rounded-lg p-1 shadow-xl">
+                <button
+                  type="button"
+                  onClick={signOut}
+                  className="flex items-center gap-2 w-full px-3 py-2 rounded-md text-sm font-medium text-slate-100 hover:bg-slate-700 hover:text-white transition-colors"
+                >
+                  <LogOut size={16} />
+                  Sign Out
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </aside>
     </>

@@ -9,10 +9,16 @@ export type InternStatus = "pending" | "active" | "completed" | "withdrawn";
 export interface Profile {
   id: string;
   full_name: string;
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
+  program: string | null;
+  section: string | null;
   email: string;
   phone: string | null;
   role: UserRole;
   student_id: string | null;
+  duty_hours_per_day: number | null;
   avatar_url: string | null;
   created_at: string;
   updated_at: string;
@@ -34,6 +40,7 @@ export interface PartnerAgency {
   contact_person: string | null;
   contact_number: string | null;
   email: string | null;
+  intern_slot_limit: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -96,6 +103,10 @@ export interface TimeRecord {
   intern_id: string;
   intern_deployment_id: string;
   date: string;
+  morning_time_in: string | null;
+  morning_time_out: string | null;
+  afternoon_time_in: string | null;
+  afternoon_time_out: string | null;
   time_in: string | null;
   time_out: string | null;
   total_hours: number | null;
@@ -110,6 +121,8 @@ export interface Feedback {
   intern_deployment_id: string;
   content: string;
   performance_rating: number | null;
+  reaction: string | null;
+  intern_read_at: string | null;
   created_at: string;
   updated_at: string;
   profiles?: Profile; // faculty profile

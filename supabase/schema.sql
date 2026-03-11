@@ -21,10 +21,16 @@ CREATE TYPE intern_status AS ENUM ('pending', 'active', 'completed', 'withdrawn'
 CREATE TABLE profiles (
   id          UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   full_name   TEXT NOT NULL,
+  first_name  TEXT,
+  middle_name TEXT,
+  last_name   TEXT,
+  program     TEXT,
+  section     TEXT,
   email       TEXT NOT NULL,
   phone       TEXT,
   role        user_role NOT NULL DEFAULT 'intern',
   student_id  TEXT,
+  duty_hours_per_day NUMERIC(4, 2) DEFAULT 8,
   avatar_url  TEXT,
   created_at  TIMESTAMPTZ DEFAULT NOW(),
   updated_at  TIMESTAMPTZ DEFAULT NOW()
@@ -48,6 +54,7 @@ CREATE TABLE partner_agencies (
   contact_person TEXT,
   contact_number TEXT,
   email          TEXT,
+  intern_slot_limit INTEGER,
   created_at     TIMESTAMPTZ DEFAULT NOW(),
   updated_at     TIMESTAMPTZ DEFAULT NOW()
 );
@@ -112,6 +119,10 @@ CREATE TABLE time_records (
   intern_id            UUID REFERENCES profiles(id)           ON DELETE CASCADE NOT NULL,
   intern_deployment_id UUID REFERENCES intern_deployments(id) ON DELETE CASCADE NOT NULL,
   date                 DATE NOT NULL,
+  morning_time_in      TIME,
+  morning_time_out     TIME,
+  afternoon_time_in    TIME,
+  afternoon_time_out   TIME,
   time_in              TIME,
   time_out             TIME,
   total_hours          NUMERIC(5, 2),
@@ -128,6 +139,8 @@ CREATE TABLE feedback (
   intern_deployment_id UUID REFERENCES intern_deployments(id) ON DELETE CASCADE NOT NULL,
   content              TEXT NOT NULL,
   performance_rating   INTEGER CHECK (performance_rating >= 1 AND performance_rating <= 5),
+  reaction             TEXT,
+  intern_read_at       TIMESTAMPTZ,
   created_at           TIMESTAMPTZ DEFAULT NOW(),
   updated_at           TIMESTAMPTZ DEFAULT NOW()
 );
@@ -148,10 +161,27 @@ $$ LANGUAGE sql SECURITY DEFINER STABLE;
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO profiles (id, full_name, email, role)
+  INSERT INTO profiles (
+    id,
+    full_name,
+    first_name,
+    middle_name,
+    last_name,
+    program,
+    section,
+    student_id,
+    email,
+    role
+  )
   VALUES (
     NEW.id,
     COALESCE(NEW.raw_user_meta_data->>'full_name', ''),
+    NEW.raw_user_meta_data->>'first_name',
+    NEW.raw_user_meta_data->>'middle_name',
+    NEW.raw_user_meta_data->>'last_name',
+    NEW.raw_user_meta_data->>'program',
+    NEW.raw_user_meta_data->>'section',
+    NEW.raw_user_meta_data->>'student_id',
     NEW.email,
     COALESCE((NEW.raw_user_meta_data->>'role')::user_role, 'intern')
   );

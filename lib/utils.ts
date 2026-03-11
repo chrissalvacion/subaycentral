@@ -54,3 +54,26 @@ export function getCurrentMonthYear() {
     year: String(now.getFullYear()),
   };
 }
+
+export function calculateExpectedEndDate(
+  startDate: string | null | undefined,
+  requiredHours: number | null | undefined,
+  renderedHours: number | null | undefined,
+  dutyHoursPerDay: number | null | undefined
+): string | null {
+  if (!startDate) return null;
+
+  const required = Number(requiredHours ?? 0);
+  const rendered = Number(renderedHours ?? 0);
+  const dutyHours = Number(dutyHoursPerDay ?? 8);
+  const safeDutyHours = dutyHours > 0 ? dutyHours : 8;
+
+  const remainingHours = Math.max(0, required - rendered);
+  const daysNeeded = Math.ceil(remainingHours / safeDutyHours);
+
+  const start = new Date(`${startDate}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return null;
+
+  start.setDate(start.getDate() + Math.max(0, daysNeeded - 1));
+  return start.toISOString().slice(0, 10);
+}

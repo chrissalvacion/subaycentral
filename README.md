@@ -1,10 +1,8 @@
 # SubayCentral
 
-SubayCentral is an OJT Daily Accomplishment and Time Monitoring System built with Next.js, React, Tailwind CSS, and Supabase. It is structured for Vercel deployment and supports three role-based user groups:
+SubayCentral is an OJT Daily Accomplishment and Time Monitoring System built with Next.js, React, Tailwind CSS, and Supabase.
 
-- Admin
-- Faculty
-- Intern
+For local development, the project supports SQLite-first mode so you can run without setting up Supabase first.
 
 ## Core Features
 
@@ -41,11 +39,12 @@ SubayCentral is an OJT Daily Accomplishment and Time Monitoring System built wit
 - Next.js 16 App Router
 - React 19
 - Tailwind CSS 4
-- Supabase Auth + Postgres + RLS
+- SQLite (local development mode)
+- Supabase Auth + Postgres + RLS (production mode)
 - Recharts for faculty reporting
 - Vercel for hosting
 
-## Local Setup
+## Local Setup (SQLite-first)
 
 1. Install dependencies:
 
@@ -53,72 +52,68 @@ SubayCentral is an OJT Daily Accomplishment and Time Monitoring System built wit
 npm install
 ```
 
-2. Copy the environment template and fill in your Supabase values:
+2. Copy env template:
 
 ```bash
 copy .env.local.example .env.local
 ```
 
-Required environment variables:
+3. Start local SQLite mode:
+
+```bash
+npm run dev:sqlite
+```
+
+SQLite mode creates and seeds `dev.sqlite` automatically.
+
+Demo login accounts (password for all: `password123`):
+
+- `admin@subaycentral.local`
+- `faculty@subaycentral.local`
+- `intern@subaycentral.local`
+
+4. Open `http://localhost:3000`
+
+## Local Setup (Supabase mode)
+
+If you want to use Supabase locally instead of SQLite:
+
+1. Set these values in `.env.local`:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 
-3. Run the Supabase schema in your Supabase SQL editor:
+2. Remove or comment out:
 
-- [supabase/schema.sql](supabase/schema.sql)
+- `DEV_DB=sqlite`
+- `NEXT_PUBLIC_DEV_DB=sqlite`
 
-4. Start the development server:
+3. Run schema in Supabase SQL Editor:
+
+- `supabase/schema.sql`
+
+4. Start dev server:
 
 ```bash
 npm run dev
 ```
 
-5. Open `http://localhost:3000`
-
-## Supabase Notes
-
-The schema includes:
-
-- Profile extension for `auth.users`
-- Programs
-- Partner agencies
-- Deployments
-- Deployment to faculty assignments
-- Intern deployment records
-- Daily records
-- Time records
-- Feedback
-- Row-level security policies by role
-
-The `handle_new_user()` trigger auto-creates a `profiles` row when a new user is created through Supabase Auth.
-
 ## Deployment on Vercel
 
 1. Push this project to GitHub.
 2. Import the repository into Vercel.
-3. Add the same environment variables from `.env.local` into the Vercel project settings.
+3. Set environment variables in Vercel project settings.
 4. Deploy.
 
-Recommended environment variables in Vercel:
+Production variables:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 
-## Important Implementation Notes
-
-- The admin user creation flow uses the Supabase service role key and must remain server-only.
-- Pages are responsive and designed for desktop and mobile layouts.
-- Authentication redirects are handled through the app proxy.
-- Browser-side Supabase initialization uses safe fallbacks so production builds succeed before environment variables are attached in Vercel.
-
 ## Build Check
-
-Production build validation completed successfully with:
 
 ```bash
 npm run build
 ```
-# subaycentral

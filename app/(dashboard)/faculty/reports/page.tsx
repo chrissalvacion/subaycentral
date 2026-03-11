@@ -4,10 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { Select } from "@/components/ui/Select";
 import { getMonthOptions, getCurrentMonthYear, formatHours } from "@/lib/utils";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { Download } from "lucide-react";
 
 type InternReportSourceRow = {
   id: string;
@@ -23,6 +25,15 @@ type TimeSummaryRow = {
   total_hours: number | null;
 };
 
+type DeploymentExportRow = {
+  id: string;
+  start_date: string | null;
+  expected_end_date: string | null;
+  status: string;
+  profiles: { full_name?: string; email?: string } | null;
+  partner_agencies: { name?: string } | null;
+};
+
 export default function FacultyReportsPage() {
   const supabase = createClient();
   const { profile } = useAuth();
@@ -32,30 +43,41 @@ export default function FacultyReportsPage() {
   const [year, setYear] = useState(current.year);
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<{ name: string; hours: number; dailyCount: number }[]>([]);
+  const [deploymentRowsForExport, setDeploymentRowsForExport] = useState<DeploymentExportRow[]>([]);
 
   useEffect(() => {
     if (!profile) return;
     const currentProfile = profile;
     async function load() {
       setLoading(true);
-      const { data: depFac } = await supabase
-        .from("deployment_faculty")
-        .select("deployment_id")
-        .eq("faculty_id", currentProfile.id);
-      const deploymentIds =
-        ((depFac as { deployment_id: string }[] | null) ?? []).map(
-          (d) => d.deployment_id
-        );
-      if (deploymentIds.length === 0) {
+
+      if (!currentProfile.program || !currentProfile.section) {
         setRows([]);
+        setLoading(false);
+        return;
+      }
+
+      const { data: scopedInternProfiles } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("role", "intern")
+        .eq("program", currentProfile.program)
+        .eq("section", currentProfile.section);
+
+      const internIds =
+        ((scopedInternProfiles as { id: string }[] | null) ?? []).map((intern) => intern.id);
+
+      if (internIds.length === 0) {
+        setRows([]);
+        setDeploymentRowsForExport([]);
         setLoading(false);
         return;
       }
 
       const { data: internDeps } = await supabase
         .from("intern_deployments")
-        .select("id, intern_id, profiles(full_name)")
-        .in("deployment_id", deploymentIds);
+        .select("id, intern_id, start_date, expected_end_date, status, profiles(full_name, email), partner_agencies(name)")
+        .in("intern_id", internIds);
       const depIds =
         ((internDeps as { id: string }[] | null) ?? []).map((d) => d.id);
 
@@ -92,10 +114,46 @@ export default function FacultyReportsPage() {
       });
 
       setRows(Array.from(map.values()).sort((a, b) => b.hours - a.hours));
+      setDeploymentRowsForExport((internDeps as DeploymentExportRow[] | null) ?? []);
       setLoading(false);
     }
     load();
   }, [profile, supabase, month, year]);
+
+  function exportInternsByAgency() {
+    if (deploymentRowsForExport.length === 0) return;
+
+    const sorted = [...deploymentRowsForExport].sort((a, b) => {
+      const agencyA = a.partner_agencies?.name ?? "Unassigned";
+      const agencyB = b.partner_agencies?.name ?? "Unassigned";
+      if (agencyA !== agencyB) return agencyA.localeCompare(agencyB);
+      return (a.profiles?.full_name ?? "Intern").localeCompare(b.profiles?.full_name ?? "Intern");
+    });
+
+    const headers = ["Agency", "Intern", "Email", "Start Date", "Expected End Date", "Status"];
+    const rowsCsv = sorted.map((row) => [
+      row.partner_agencies?.name ?? "Unassigned",
+      row.profiles?.full_name ?? "Intern",
+      row.profiles?.email ?? "",
+      row.start_date ?? "",
+      row.expected_end_date ?? "",
+      row.status,
+    ]);
+
+    const csv = [headers, ...rowsCsv]
+      .map((line) => line.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `agency-intern-deployments-${year}-${month}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
 
   const totals = useMemo(() => {
     return rows.reduce(
@@ -107,6 +165,16 @@ export default function FacultyReportsPage() {
       { hours: 0, daily: 0 }
     );
   }, [rows]);
+
+  const averageRenderedHours = useMemo(() => {
+    if (rows.length === 0) return 0;
+    return Number((totals.hours / rows.length).toFixed(2));
+  }, [rows.length, totals.hours]);
+
+  const averageDailySubmissions = useMemo(() => {
+    if (rows.length === 0) return 0;
+    return Number((totals.daily / rows.length).toFixed(2));
+  }, [rows.length, totals.daily]);
 
   return (
     <div className="space-y-6">
@@ -123,6 +191,16 @@ export default function FacultyReportsPage() {
             onChange={(e) => setYear(e.target.value)}
             className="w-28 text-sm border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
           />
+          <Button
+            type="button"
+            variant="secondary"
+            icon={<Download size={16} />}
+            onClick={exportInternsByAgency}
+            disabled={loading || deploymentRowsForExport.length === 0}
+            title="Export interns deployed by agency"
+          >
+            Export Agency List
+          </Button>
         </div>
       </div>
 
@@ -133,11 +211,14 @@ export default function FacultyReportsPage() {
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card title="Total Rendered Hours">
+            {/* <Card title="Total Rendered Hours">
               <p className="text-3xl font-bold text-slate-900">{formatHours(totals.hours)}</p>
+            </Card> */}
+            <Card title="Average Rendered Hours">
+              <p className="text-3xl font-bold text-slate-900">{formatHours(averageRenderedHours)}</p>
             </Card>
-            <Card title="Total Daily Submissions">
-              <p className="text-3xl font-bold text-slate-900">{totals.daily}</p>
+            <Card title="Average Daily Submissions">
+              <p className="text-3xl font-bold text-slate-900">{averageDailySubmissions}</p>
             </Card>
           </div>
 

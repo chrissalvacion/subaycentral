@@ -1,26 +1,17 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { DailyRecord } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
-import { Textarea } from "@/components/ui/Textarea";
-import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { getMonthOptions, getCurrentMonthYear, formatDate } from "@/lib/utils";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, ChevronRight, FileDown } from "lucide-react";
 
 type RecordRow = DailyRecord;
-
-type FormData = {
-  date: string;
-  tasks: string;
-  notes: string;
-};
-
-const defaultForm: FormData = { date: "", tasks: "", notes: "" };
 
 export default function DailyRecordsPage() {
   const supabase = createClient();
@@ -32,11 +23,6 @@ export default function DailyRecordsPage() {
   const [loading, setLoading] = useState(true);
   const [month, setMonth] = useState(current.month);
   const [year, setYear] = useState(current.year);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<RecordRow | null>(null);
-  const [form, setForm] = useState<FormData>(defaultForm);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!profile) return;
@@ -70,48 +56,51 @@ export default function DailyRecordsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  function openCreate() {
-    setEditing(null);
-    setForm({ ...defaultForm, date: `${year}-${month}-01` });
-    setError(null);
-    setModalOpen(true);
-  }
+  function exportAsDocument() {
+    if (records.length === 0) return;
 
-  function openEdit(r: RecordRow) {
-    setEditing(r);
-    setForm({ date: r.date, tasks: r.tasks, notes: r.notes ?? "" });
-    setError(null);
-    setModalOpen(true);
-  }
+    const rowsHtml = records
+      .map((record) => {
+        const notes = (record.notes ?? "-").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const tasks = record.tasks.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return `
+          <tr>
+            <td style="border:1px solid #cbd5e1;padding:8px;vertical-align:top;">${formatDate(record.date)}</td>
+            <td style="border:1px solid #cbd5e1;padding:8px;vertical-align:top;white-space:pre-wrap;">${tasks}</td>
+            <td style="border:1px solid #cbd5e1;padding:8px;vertical-align:top;white-space:pre-wrap;">${notes}</td>
+          </tr>
+        `;
+      })
+      .join("");
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!profile || !internDeploymentId) return;
-    const currentProfile = profile;
-    setSaving(true);
-    setError(null);
-    const payload = {
-      intern_id: currentProfile.id,
-      intern_deployment_id: internDeploymentId,
-      date: form.date,
-      tasks: form.tasks,
-      notes: form.notes || null,
-    };
-    try {
-      if (editing) {
-        const { error: err } = await supabase.from("daily_records").update(payload).eq("id", editing.id);
-        if (err) throw err;
-      } else {
-        const { error: err } = await supabase.from("daily_records").insert(payload);
-        if (err) throw err;
-      }
-      await load();
-      setModalOpen(false);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "An error occurred");
-    } finally {
-      setSaving(false);
-    }
+    const html = `
+      <html>
+      <head><meta charset="utf-8" /></head>
+      <body>
+        <h2>Daily Records (${month}/${year})</h2>
+        <table style="border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:12px;">
+          <thead>
+            <tr>
+              <th style="border:1px solid #cbd5e1;padding:8px;text-align:left;">Date</th>
+              <th style="border:1px solid #cbd5e1;padding:8px;text-align:left;">Tasks / Accomplishments</th>
+              <th style="border:1px solid #cbd5e1;padding:8px;text-align:left;">Notes</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], { type: "application/msword" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `daily-records-${year}-${month}.doc`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -124,49 +113,48 @@ export default function DailyRecordsPage() {
         <div className="flex gap-3">
           <Select options={getMonthOptions()} value={month} onChange={(e) => setMonth(e.target.value)} />
           <input type="number" value={year} onChange={(e) => setYear(e.target.value)} className="w-28 text-sm border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white" />
-          <Button onClick={openCreate} icon={<Plus size={16} />}>Add Record</Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={exportAsDocument}
+            icon={<FileDown size={16} />}
+            disabled={loading || records.length === 0}
+            aria-label="Export daily records document"
+            title="Export as DOC"
+            className="px-3"
+          />
+          <Link href="/intern/records/new">
+            <Button icon={<Plus size={16} />}>Add Record</Button>
+          </Link>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+      <div className="space-y-3">
         {loading ? (
-          <div className="p-10 flex justify-center"><LoadingSpinner /></div>
+          <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-10 flex justify-center"><LoadingSpinner /></div>
         ) : records.length === 0 ? (
-          <div className="p-10 text-center text-slate-400 text-sm">No daily records for the selected month.</div>
+          <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-10 text-center text-slate-400 text-sm">No daily records for the selected month.</div>
         ) : (
-          <div className="divide-y divide-slate-100">
+          <>
             {records.map((r) => (
-              <div key={r.id} className="px-5 py-4 flex flex-col sm:flex-row sm:items-start gap-3">
-                <div className="sm:w-40 flex-shrink-0">
-                  <p className="font-semibold text-slate-900">{formatDate(r.date)}</p>
+              <Link
+                key={r.id}
+                href={`/intern/records/${r.id}`}
+                className="block bg-white rounded-xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow"
+              >
+                <div className="px-5 py-4 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-900">{formatDate(r.date)}</p>
+                    <p className="text-slate-700 mt-2 whitespace-pre-line line-clamp-2">{r.tasks}</p>
+                    {r.notes && <p className="text-slate-500 text-sm mt-1 line-clamp-1">Notes: {r.notes}</p>}
+                  </div>
+                  <ChevronRight size={16} className="text-slate-400 flex-shrink-0 mt-1" />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-slate-700 whitespace-pre-line">{r.tasks}</p>
-                  {r.notes && <p className="text-slate-500 text-sm mt-2">Notes: {r.notes}</p>}
-                </div>
-                <div className="flex-shrink-0">
-                  <button onClick={() => openEdit(r)} className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
-                    <Pencil size={15} />
-                  </button>
-                </div>
-              </div>
+              </Link>
             ))}
-          </div>
+          </>
         )}
       </div>
-
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? "Edit Daily Record" : "Add Daily Record"} maxWidth="lg">
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required className="block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
-          <Textarea label="Tasks / Accomplishments" value={form.tasks} onChange={(e) => setForm({ ...form, tasks: e.target.value })} rows={6} required />
-          <Textarea label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} />
-          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button type="submit" loading={saving}>{editing ? "Save Changes" : "Add Record"}</Button>
-          </div>
-        </form>
-      </Modal>
     </div>
   );
 }

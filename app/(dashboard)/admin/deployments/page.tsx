@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { Deployment, Program, Profile, InternDeployment } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
@@ -11,7 +12,7 @@ import { Modal } from "@/components/ui/Modal";
 import { DeploymentStatusBadge } from "@/components/ui/Badge";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { formatDate } from "@/lib/utils";
-import { Plus, Pencil, Trash2, Users, UserPlus, X, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Pencil, Trash2, UserPlus, X, ChevronDown, ChevronUp } from "lucide-react";
 
 const STATUS_OPTIONS = [
   { value: "upcoming", label: "Upcoming" },
@@ -47,7 +48,6 @@ export default function DeploymentsPage() {
   const supabase = createClient();
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [programs, setPrograms] = useState<Program[]>([]);
-  const [allFaculty, setAllFaculty] = useState<Profile[]>([]);
   const [allInterns, setAllInterns] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -57,11 +57,6 @@ export default function DeploymentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Faculty assignment modal
-  const [facultyModalOpen, setFacultyModalOpen] = useState(false);
-  const [facultyTarget, setFacultyTarget] = useState<Deployment | null>(null);
-  const [assignedFaculty, setAssignedFaculty] = useState<string[]>([]);
-
   // Intern enrollment modal
   const [internModalOpen, setInternModalOpen] = useState(false);
   const [internTarget, setInternTarget] = useState<Deployment | null>(null);
@@ -69,16 +64,14 @@ export default function DeploymentsPage() {
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [{ data: deps }, { data: progs }, { data: faculty }, { data: interns }] =
+    const [{ data: deps }, { data: progs }, { data: interns }] =
       await Promise.all([
-        supabase.from("deployments").select("*, programs(*), deployment_faculty(*, profiles(*))").order("created_at", { ascending: false }),
+        supabase.from("deployments").select("*, programs(*)").order("created_at", { ascending: false }),
         supabase.from("programs").select("*").order("name"),
-        supabase.from("profiles").select("*").eq("role", "faculty").order("full_name"),
         supabase.from("profiles").select("*").eq("role", "intern").order("full_name"),
       ]);
     if (deps) setDeployments(deps as Deployment[]);
     if (progs) setPrograms(progs as Program[]);
-    if (faculty) setAllFaculty(faculty as Profile[]);
     if (interns) setAllInterns(interns as Profile[]);
     setLoading(false);
   }, [supabase]);
@@ -148,30 +141,6 @@ export default function DeploymentsPage() {
     else await loadData();
   }
 
-  // Faculty assignment
-  async function openFacultyModal(d: Deployment) {
-    setFacultyTarget(d);
-    const existing = (d.deployment_faculty ?? []).map((df) => df.faculty_id);
-    setAssignedFaculty(existing);
-    setFacultyModalOpen(true);
-  }
-
-  async function saveFacultyAssignment() {
-    if (!facultyTarget) return;
-    setSaving(true);
-    // Delete existing
-    await supabase.from("deployment_faculty").delete().eq("deployment_id", facultyTarget.id);
-    // Insert new
-    if (assignedFaculty.length > 0) {
-      await supabase.from("deployment_faculty").insert(
-        assignedFaculty.map((fid) => ({ deployment_id: facultyTarget.id, faculty_id: fid }))
-      );
-    }
-    await loadData();
-    setFacultyModalOpen(false);
-    setSaving(false);
-  }
-
   // Intern enrollment
   async function openInternModal(d: Deployment) {
     setInternTarget(d);
@@ -233,7 +202,12 @@ export default function DeploymentsPage() {
               <div className="flex items-center gap-3 px-5 py-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-semibold text-slate-900">{d.name}</p>
+                    <Link
+                      href={`/admin/deployments/${d.id}`}
+                      className="font-semibold text-slate-900 hover:text-indigo-700 hover:underline"
+                    >
+                      {d.name}
+                    </Link>
                     <DeploymentStatusBadge status={d.status} />
                   </div>
                   <p className="text-sm text-slate-500 mt-0.5">
@@ -243,9 +217,6 @@ export default function DeploymentsPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  <Button size="sm" variant="ghost" icon={<Users size={14} />} onClick={() => openFacultyModal(d)}>
-                    <span className="hidden sm:inline">Faculty</span>
-                  </Button>
                   <Button size="sm" variant="ghost" icon={<UserPlus size={14} />} onClick={() => openInternModal(d)}>
                     <span className="hidden sm:inline">Interns</span>
                   </Button>
@@ -270,11 +241,8 @@ export default function DeploymentsPage() {
                     {d.description && <p className="text-slate-600 col-span-2">{d.description}</p>}
                     <div><span className="text-slate-400">Start Date: </span><span className="text-slate-700">{formatDate(d.start_date)}</span></div>
                     <div><span className="text-slate-400">End Date: </span><span className="text-slate-700">{formatDate(d.end_date)}</span></div>
-                    <div className="col-span-2">
-                      <span className="text-slate-400">Assigned Faculty: </span>
-                      {(d.deployment_faculty ?? []).length === 0
-                        ? <span className="text-slate-400">None</span>
-                        : d.deployment_faculty?.map((df) => df.profiles?.full_name).join(", ")}
+                    <div className="col-span-2 text-slate-500">
+                      Faculty assignment is now managed in Accounts by program and section.
                     </div>
                   </div>
                 </div>
@@ -304,33 +272,6 @@ export default function DeploymentsPage() {
             <Button type="submit" loading={saving}>{editing ? "Save Changes" : "Create Deployment"}</Button>
           </div>
         </form>
-      </Modal>
-
-      {/* Faculty assignment modal */}
-      <Modal open={facultyModalOpen} onClose={() => setFacultyModalOpen(false)} title={`Assign Faculty – ${facultyTarget?.name}`} maxWidth="sm">
-        <div className="flex flex-col gap-3">
-          <p className="text-sm text-slate-500">Select faculty members to assign to this deployment.</p>
-          <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden max-h-64 overflow-y-auto">
-            {allFaculty.map((f) => (
-              <label key={f.id} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={assignedFaculty.includes(f.id)}
-                  onChange={(e) => {
-                    if (e.target.checked) setAssignedFaculty([...assignedFaculty, f.id]);
-                    else setAssignedFaculty(assignedFaculty.filter((id) => id !== f.id));
-                  }}
-                  className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                />
-                <span className="text-sm text-slate-800">{f.full_name}</span>
-              </label>
-            ))}
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={() => setFacultyModalOpen(false)}>Cancel</Button>
-            <Button loading={saving} onClick={saveFacultyAssignment}>Save Assignment</Button>
-          </div>
-        </div>
       </Modal>
 
       {/* Intern enrollment modal */}

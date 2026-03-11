@@ -14,8 +14,9 @@ import {
   createAccount,
   updateAccount,
   deleteAccount,
+  resetPassword,
 } from "./actions";
-import { Plus, Pencil, Trash2, Search } from "lucide-react";
+import { Plus, Search, MoreVertical } from "lucide-react";
 
 const ROLE_OPTIONS = [
   { value: "faculty", label: "Faculty" },
@@ -29,6 +30,8 @@ type FormData = {
   role: "faculty" | "intern";
   phone: string;
   student_id: string;
+  program: string;
+  section: string;
 };
 
 const defaultForm: FormData = {
@@ -38,15 +41,20 @@ const defaultForm: FormData = {
   role: "intern",
   phone: "",
   student_id: "",
+  program: "",
+  section: "",
 };
 
 export default function AccountsPage() {
   const supabase = createClient();
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [programs, setPrograms] = useState<{ id: string; name: string }[]>([]);
   const [filtered, setFiltered] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState("all");
+  const [activeTab, setActiveTab] = useState<"faculty" | "intern">("faculty");
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Profile | null>(null);
   const [form, setForm] = useState<FormData>(defaultForm);
@@ -55,14 +63,23 @@ export default function AccountsPage() {
 
   const fetchProfiles = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .in("role", ["faculty", "intern"])
-      .order("created_at", { ascending: false });
-    if (data) {
-      setProfiles(data as Profile[]);
-      setFiltered(data as Profile[]);
+    const [{ data: profileData }, { data: programData }] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("*")
+        .in("role", ["faculty", "intern"])
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("programs")
+        .select("id, name")
+        .order("name", { ascending: true }),
+    ]);
+    if (profileData) {
+      setProfiles(profileData as Profile[]);
+      setFiltered(profileData as Profile[]);
+    }
+    if (programData) {
+      setPrograms(programData as { id: string; name: string }[]);
     }
     setLoading(false);
   }, [supabase]);
@@ -72,8 +89,7 @@ export default function AccountsPage() {
   }, [fetchProfiles]);
 
   useEffect(() => {
-    let result = profiles;
-    if (roleFilter !== "all") result = result.filter((p) => p.role === roleFilter);
+    let result = profiles.filter((p) => p.role === activeTab);
     if (search) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -83,7 +99,11 @@ export default function AccountsPage() {
       );
     }
     setFiltered(result);
-  }, [search, roleFilter, profiles]);
+  }, [search, activeTab, profiles]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, activeTab, pageSize]);
 
   function openCreate() {
     setEditing(null);
@@ -101,6 +121,8 @@ export default function AccountsPage() {
       role: profile.role as "faculty" | "intern",
       phone: profile.phone ?? "",
       student_id: profile.student_id ?? "",
+      program: profile.program ?? "",
+      section: profile.section ?? "",
     });
     setError(null);
     setModalOpen(true);
@@ -112,10 +134,21 @@ export default function AccountsPage() {
     setError(null);
     try {
       if (editing) {
+        if (form.password && form.password.length < 6) {
+          setError("Password must be at least 6 characters.");
+          setSaving(false);
+          return;
+        }
+
         await updateAccount(editing.id, {
           full_name: form.full_name,
+          email: form.email,
+          role: form.role,
+          password: form.password || undefined,
           phone: form.phone || undefined,
-          student_id: form.student_id || undefined,
+          student_id: form.role === "intern" ? form.student_id || null : null,
+          program: form.program || null,
+          section: form.section || null,
         });
       } else {
         if (!form.password || form.password.length < 6) {
@@ -130,6 +163,8 @@ export default function AccountsPage() {
           role: form.role,
           phone: form.phone || undefined,
           student_id: form.student_id || undefined,
+          program: form.program || undefined,
+          section: form.section || undefined,
         });
       }
       await fetchProfiles();
@@ -156,6 +191,34 @@ export default function AccountsPage() {
     }
   }
 
+  async function handleResetPassword(profile: Profile) {
+    if (!confirm(`Reset password for "${profile.full_name}" to password123?`)) return;
+    try {
+      await resetPassword(profile.id, "password123");
+      alert(`Password reset for ${profile.full_name}.`);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to reset password");
+    }
+  }
+
+  const facultyCount = profiles.filter((p) => p.role === "faculty").length;
+  const internCount = profiles.filter((p) => p.role === "intern").length;
+
+  const totalRows = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalRows);
+  const paginatedRows = filtered.slice(startIndex, endIndex);
+
+  function goToPreviousPage() {
+    setCurrentPage((prev) => Math.max(1, prev - 1));
+  }
+
+  function goToNextPage() {
+    setCurrentPage((prev) => Math.min(totalPages, prev + 1));
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -168,6 +231,34 @@ export default function AccountsPage() {
         <Button onClick={openCreate} icon={<Plus size={16} />}>
           Add Account
         </Button>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex items-center gap-2 border-b border-slate-200">
+        <button
+          type="button"
+          onClick={() => setActiveTab("faculty")}
+          className={[
+            "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+            activeTab === "faculty"
+              ? "border-indigo-600 text-indigo-700"
+              : "border-transparent text-slate-500 hover:text-slate-700",
+          ].join(" ")}
+        >
+          Faculty ({facultyCount})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("intern")}
+          className={[
+            "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+            activeTab === "intern"
+              ? "border-indigo-600 text-indigo-700"
+              : "border-transparent text-slate-500 hover:text-slate-700",
+          ].join(" ")}
+        >
+          Intern ({internCount})
+        </button>
       </div>
 
       {/* Filters */}
@@ -185,29 +276,21 @@ export default function AccountsPage() {
             className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
         </div>
-        <select
-          value={roleFilter}
-          onChange={(e) => setRoleFilter(e.target.value)}
-          className="text-sm border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-        >
-          <option value="all">All Roles</option>
-          <option value="faculty">Faculty</option>
-          <option value="intern">Intern</option>
-        </select>
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-visible min-h-[calc(100vh-18rem)] flex flex-col">
         {loading ? (
-          <div className="p-10 flex justify-center">
+          <div className="p-10 flex justify-center flex-1 items-center">
             <LoadingSpinner />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="p-10 text-center text-slate-400 text-sm">
+          <div className="p-10 text-center text-slate-400 text-sm flex-1 flex items-center justify-center">
             No accounts found.
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          <div className="overflow-x-auto flex-1">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50">
@@ -220,8 +303,16 @@ export default function AccountsPage() {
                   <th className="text-left px-4 py-3 font-semibold text-slate-600">
                     Role
                   </th>
-                  <th className="text-left px-4 py-3 font-semibold text-slate-600 hidden md:table-cell">
-                    Student ID
+                  {activeTab === "intern" && (
+                    <th className="text-left px-4 py-3 font-semibold text-slate-600 hidden md:table-cell">
+                      Student ID
+                    </th>
+                  )}
+                  <th className="text-left px-4 py-3 font-semibold text-slate-600 hidden lg:table-cell">
+                    Program
+                  </th>
+                  <th className="text-left px-4 py-3 font-semibold text-slate-600 hidden xl:table-cell">
+                    Section
                   </th>
                   <th className="text-left px-4 py-3 font-semibold text-slate-600 hidden lg:table-cell">
                     Joined
@@ -230,7 +321,7 @@ export default function AccountsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {filtered.map((p) => (
+                {paginatedRows.map((p) => (
                   <tr key={p.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
@@ -255,26 +346,52 @@ export default function AccountsPage() {
                     <td className="px-4 py-3">
                       <RoleBadge role={p.role} />
                     </td>
-                    <td className="px-4 py-3 text-slate-500 hidden md:table-cell">
-                      {p.student_id ?? "—"}
+                    {activeTab === "intern" && (
+                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">
+                        {p.student_id ?? "—"}
+                      </td>
+                    )}
+                    <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">
+                      {p.program ?? "—"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-500 hidden xl:table-cell">
+                      {p.section ?? "—"}
                     </td>
                     <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">
                       {formatDate(p.created_at)}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="relative group inline-block">
                         <button
-                          onClick={() => openEdit(p)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                          type="button"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                          aria-label="Open actions"
                         >
-                          <Pencil size={15} />
+                          <MoreVertical size={15} />
                         </button>
-                        <button
-                          onClick={() => handleDelete(p)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                        <div className="absolute right-0 top-7 z-20 min-w-44 bg-white border border-slate-200 rounded-lg shadow-lg p-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible group-focus-within:opacity-100 group-focus-within:visible transition-all">
+                          <button
+                            type="button"
+                            onClick={() => handleResetPassword(p)}
+                            className="w-full text-left px-3 py-2 text-sm rounded-md text-slate-700 hover:bg-slate-100"
+                          >
+                            Reset Password
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEdit(p)}
+                            className="w-full text-left px-3 py-2 text-sm rounded-md text-slate-700 hover:bg-slate-100"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(p)}
+                            className="w-full text-left px-3 py-2 text-sm rounded-md text-red-600 hover:bg-red-50"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
                     </td>
                   </tr>
@@ -282,6 +399,52 @@ export default function AccountsPage() {
               </tbody>
             </table>
           </div>
+          <div className="border-t border-slate-100 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm text-slate-600">
+              <span>Show</span>
+              <Select
+                value={String(pageSize)}
+                onChange={(e) => setPageSize(parseInt(e.target.value, 10))}
+                options={[
+                  { value: "10", label: "10" },
+                  { value: "20", label: "20" },
+                  { value: "50", label: "50" },
+                  { value: "100", label: "100" },
+                  { value: "500", label: "500" },
+                ]}
+                className="w-24"
+              />
+              <span>rows</span>
+            </div>
+
+            <div className="flex items-center gap-2 sm:gap-3">
+              <span className="text-sm text-slate-500">
+                {startIndex + 1}-{endIndex} of {totalRows}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={goToPreviousPage}
+                disabled={safeCurrentPage <= 1}
+              >
+                Previous
+              </Button>
+              <span className="text-sm text-slate-600 min-w-20 text-center">
+                Page {safeCurrentPage} / {totalPages}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={goToNextPage}
+                disabled={safeCurrentPage >= totalPages}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+          </>
         )}
       </div>
 
@@ -304,19 +467,15 @@ export default function AccountsPage() {
             value={form.email}
             onChange={(e) => setForm({ ...form, email: e.target.value })}
             required
-            disabled={!!editing}
-            helperText={editing ? "Email cannot be changed." : undefined}
           />
-          {!editing && (
-            <Input
-              label="Initial Password"
-              type="password"
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              required
-              helperText="Minimum 6 characters."
-            />
-          )}
+          <Input
+            label={editing ? "Password (optional)" : "Initial Password"}
+            type="password"
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+            required={!editing}
+            helperText={editing ? "Leave blank to keep current password." : "Minimum 6 characters."}
+          />
           <Select
             label="Role"
             value={form.role}
@@ -324,7 +483,6 @@ export default function AccountsPage() {
               setForm({ ...form, role: e.target.value as "faculty" | "intern" })
             }
             options={ROLE_OPTIONS}
-            disabled={!!editing}
           />
           <Input
             label="Phone (optional)"
@@ -340,6 +498,50 @@ export default function AccountsPage() {
                 setForm({ ...form, student_id: e.target.value })
               }
             />
+          )}
+
+          {(form.role === "intern" || editing?.role === "intern") && (
+            <>
+              <Select
+                label="Program"
+                value={form.program}
+                onChange={(e) => setForm({ ...form, program: e.target.value })}
+                options={[
+                  { value: "", label: "Select program" },
+                  ...programs.map((program) => ({ value: program.name, label: program.name })),
+                ]}
+                required
+              />
+              <Input
+                label="Section"
+                value={form.section}
+                onChange={(e) => setForm({ ...form, section: e.target.value })}
+                placeholder="e.g. 3A"
+                required
+              />
+            </>
+          )}
+
+          {(form.role === "faculty" || editing?.role === "faculty") && (
+            <>
+              <Select
+                label="Assigned Program"
+                value={form.program}
+                onChange={(e) => setForm({ ...form, program: e.target.value })}
+                options={[
+                  { value: "", label: "Select program" },
+                  ...programs.map((program) => ({ value: program.name, label: program.name })),
+                ]}
+                required
+              />
+              <Input
+                label="Assigned Section"
+                value={form.section}
+                onChange={(e) => setForm({ ...form, section: e.target.value })}
+                placeholder="e.g. 3A"
+                required
+              />
+            </>
           )}
 
           {error && (
