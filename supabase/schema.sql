@@ -153,6 +153,30 @@ RETURNS user_role AS $$
   SELECT role FROM profiles WHERE id = auth.uid();
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
+CREATE OR REPLACE FUNCTION normalize_text_value(input TEXT)
+RETURNS TEXT AS $$
+  SELECT LOWER(TRIM(COALESCE(input, '')));
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION normalize_program_value(input TEXT)
+RETURNS TEXT AS $$
+  SELECT CASE
+    WHEN LOWER(TRIM(COALESCE(input, ''))) IN ('bsit', 'bs information technology') THEN 'bs information technology'
+    WHEN LOWER(TRIM(COALESCE(input, ''))) IN ('bsis', 'bs information systems') THEN 'bs information systems'
+    ELSE LOWER(TRIM(COALESCE(input, '')))
+  END;
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION get_current_user_program()
+RETURNS TEXT AS $$
+  SELECT program FROM profiles WHERE id = auth.uid();
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION get_current_user_section()
+RETURNS TEXT AS $$
+  SELECT section FROM profiles WHERE id = auth.uid();
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
 -- ============================================================
 -- TRIGGERS
 -- ============================================================
@@ -279,13 +303,10 @@ CREATE POLICY "Admin updates profiles"        ON profiles FOR UPDATE USING (get_
 CREATE POLICY "Admin deletes profiles"        ON profiles FOR DELETE USING (get_current_user_role() = 'admin');
 CREATE POLICY "User updates own profile"      ON profiles FOR UPDATE USING (id = auth.uid());
 CREATE POLICY "Faculty reads assigned interns" ON profiles FOR SELECT USING (
-  get_current_user_role() = 'faculty' AND role = 'intern' AND
-  id IN (
-    SELECT id.intern_id FROM intern_deployments id
-    WHERE id.deployment_id IN (
-      SELECT df.deployment_id FROM deployment_faculty df WHERE df.faculty_id = auth.uid()
-    )
-  )
+  get_current_user_role() = 'faculty' AND
+  role = 'intern' AND
+  normalize_program_value(program) = normalize_program_value(get_current_user_program()) AND
+  normalize_text_value(section) = normalize_text_value(get_current_user_section())
 );
 
 -- ---------- programs ----------
@@ -308,11 +329,23 @@ CREATE POLICY "Admin manages dep_faculty" ON deployment_faculty FOR ALL   USING 
 CREATE POLICY "Admin manages intern_deployments" ON intern_deployments FOR ALL USING (get_current_user_role() = 'admin');
 CREATE POLICY "Faculty reads own deployments' interns" ON intern_deployments FOR SELECT USING (
   get_current_user_role() = 'faculty' AND
-  deployment_id IN (SELECT deployment_id FROM deployment_faculty WHERE faculty_id = auth.uid())
+  intern_id IN (
+    SELECT p.id
+    FROM profiles p
+    WHERE p.role = 'intern'
+      AND normalize_program_value(p.program) = normalize_program_value(get_current_user_program())
+      AND normalize_text_value(p.section) = normalize_text_value(get_current_user_section())
+  )
 );
 CREATE POLICY "Faculty updates intern_deployments" ON intern_deployments FOR UPDATE USING (
   get_current_user_role() = 'faculty' AND
-  deployment_id IN (SELECT deployment_id FROM deployment_faculty WHERE faculty_id = auth.uid())
+  intern_id IN (
+    SELECT p.id
+    FROM profiles p
+    WHERE p.role = 'intern'
+      AND normalize_program_value(p.program) = normalize_program_value(get_current_user_program())
+      AND normalize_text_value(p.section) = normalize_text_value(get_current_user_section())
+  )
 );
 CREATE POLICY "Intern reads own deployments" ON intern_deployments FOR SELECT USING (intern_id = auth.uid());
 
@@ -321,8 +354,11 @@ CREATE POLICY "Intern manages own daily records" ON daily_records FOR ALL USING 
 CREATE POLICY "Faculty reads assigned interns daily" ON daily_records FOR SELECT USING (
   get_current_user_role() = 'faculty' AND
   intern_id IN (
-    SELECT id.intern_id FROM intern_deployments id
-    WHERE id.deployment_id IN (SELECT deployment_id FROM deployment_faculty WHERE faculty_id = auth.uid())
+    SELECT p.id
+    FROM profiles p
+    WHERE p.role = 'intern'
+      AND normalize_program_value(p.program) = normalize_program_value(get_current_user_program())
+      AND normalize_text_value(p.section) = normalize_text_value(get_current_user_section())
   )
 );
 CREATE POLICY "Admin reads all daily records" ON daily_records FOR SELECT USING (get_current_user_role() = 'admin');
@@ -332,8 +368,11 @@ CREATE POLICY "Intern manages own time records"   ON time_records FOR ALL USING 
 CREATE POLICY "Faculty reads assigned time records" ON time_records FOR SELECT USING (
   get_current_user_role() = 'faculty' AND
   intern_id IN (
-    SELECT id.intern_id FROM intern_deployments id
-    WHERE id.deployment_id IN (SELECT deployment_id FROM deployment_faculty WHERE faculty_id = auth.uid())
+    SELECT p.id
+    FROM profiles p
+    WHERE p.role = 'intern'
+      AND normalize_program_value(p.program) = normalize_program_value(get_current_user_program())
+      AND normalize_text_value(p.section) = normalize_text_value(get_current_user_section())
   )
 );
 CREATE POLICY "Admin reads all time records" ON time_records FOR SELECT USING (get_current_user_role() = 'admin');

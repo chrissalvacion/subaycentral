@@ -50,30 +50,16 @@ export default function InternHomePage() {
           .eq("intern_deployment_id", deployment.id),
         supabase
           .from("time_records")
-          .select("morning_time_in, morning_time_out, afternoon_time_in, afternoon_time_out, time_in, time_out")
+          .select("total_hours")
           .eq("intern_deployment_id", deployment.id),
       ]);
 
-      const timeRecords = timeRecordsResult.data ?? [];
-
-      function rangeHours(timeIn: string | null, timeOut: string | null): number {
-        if (!timeIn || !timeOut) return 0;
-        const inDate = new Date(`1970-01-01T${timeIn}:00`);
-        const outDate = new Date(`1970-01-01T${timeOut}:00`);
-        const diffMs = outDate.getTime() - inDate.getTime();
-        return diffMs > 0 ? diffMs / (1000 * 60 * 60) : 0;
-      }
-
-      type TRRow = { morning_time_in: string | null; morning_time_out: string | null; afternoon_time_in: string | null; afternoon_time_out: string | null; time_in: string | null; time_out: string | null };
-      const renderedHours = timeRecords.reduce((sum: number, r: TRRow) => {
-        const morningHours = rangeHours(r.morning_time_in, r.morning_time_out);
-        const afternoonHours = rangeHours(r.afternoon_time_in, r.afternoon_time_out);
-        // Fallback to legacy time_in/time_out if new fields are absent
-        const legacyHours = (morningHours === 0 && afternoonHours === 0)
-          ? rangeHours(r.time_in, r.time_out)
-          : 0;
-        return sum + morningHours + afternoonHours + legacyHours;
-      }, 0);
+      const timeRecords = (timeRecordsResult.data as { total_hours: number | null }[] | null) ?? [];
+      const renderedHours = Number(
+        timeRecords
+          .reduce((sum: number, record) => sum + Number(record.total_hours ?? 0), 0)
+          .toFixed(2)
+      );
 
       const requiredHours = deployment.required_hours ?? deployment.deployments?.required_hours ?? 0;
       const computedExpectedEndDate = calculateExpectedEndDate(
@@ -155,7 +141,7 @@ export default function InternHomePage() {
       </Card>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Rendered Hours" value={formatHours(data.renderedHours)} icon={<Clock size={22} />} iconBg="bg-amber-100 text-amber-600" />
+        <StatCard title="Accumulated Rendered Hours" value={formatHours(data.renderedHours)} icon={<Clock size={22} />} iconBg="bg-amber-100 text-amber-600" />
         <StatCard title="Required Hours" value={formatHours(data.requiredHours)} icon={<Clock size={22} />} iconBg="bg-blue-100 text-blue-600" />
         <StatCard title="Daily Records" value={data.dailyCount} icon={<ClipboardList size={22} />} iconBg="bg-emerald-100 text-emerald-600" />
         <StatCard title="Time Logs" value={data.timeCount} icon={<Clock size={22} />} iconBg="bg-indigo-100 text-indigo-600" />
