@@ -30,8 +30,9 @@ export default function LoginPage() {
   const [registerOpen, setRegisterOpen] = useState(false);
   const [registerLoading, setRegisterLoading] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
-  const [registerSuccess, setRegisterSuccess] = useState<string | null>(null);
   const [registerShowPassword, setRegisterShowPassword] = useState(false);
+  const [verifyDialogOpen, setVerifyDialogOpen] = useState(false);
+  const [verifyEmail, setVerifyEmail] = useState("");
 
   const [studentId, setStudentId] = useState("");
   const [firstName, setFirstName] = useState("");
@@ -105,14 +106,18 @@ export default function LoginPage() {
     setRegisterEmail("");
     setRegisterPassword("");
     setRegisterError(null);
-    setRegisterSuccess(null);
     setRegisterShowPassword(false);
+  }
+
+  function closeVerifyDialog() {
+    setVerifyDialogOpen(false);
+    setRegisterOpen(false);
+    router.replace("/login");
   }
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
     setRegisterError(null);
-    setRegisterSuccess(null);
 
     if (registerPassword.length < 6) {
       setRegisterError("Password must be at least 6 characters.");
@@ -156,7 +161,7 @@ export default function LoginPage() {
       return;
     }
 
-    if (signUpData.user && signUpData.session) {
+    if (signUpData.user) {
       const profileUpdate = {
         student_id: studentId.trim(),
         first_name: firstName.trim(),
@@ -183,12 +188,22 @@ export default function LoginPage() {
           .eq("id", signUpData.user.id);
       }
 
-      router.replace("/intern");
+      if (signUpData.session) {
+        await supabase.auth.signOut();
+      }
+
+      setEmail(normalizedEmail);
+      setPassword("");
+      setVerifyEmail(normalizedEmail);
+      setVerifyDialogOpen(true);
+      setRegisterLoading(false);
       return;
     }
 
     setEmail(normalizedEmail);
-    setRegisterSuccess("Account created. Please verify your email, then sign in.");
+    setPassword("");
+    setVerifyEmail(normalizedEmail);
+    setVerifyDialogOpen(true);
     setRegisterLoading(false);
   }
 
@@ -364,12 +379,6 @@ export default function LoginPage() {
             </div>
           )}
 
-          {registerSuccess && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5 text-sm text-emerald-700">
-              {registerSuccess}
-            </div>
-          )}
-
           <div className="flex justify-end gap-2 pt-2">
             <Button
               type="button"
@@ -383,6 +392,22 @@ export default function LoginPage() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        open={verifyDialogOpen}
+        onClose={closeVerifyDialog}
+        title="Verify Your Email"
+        maxWidth="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Your account has been created. Please verify the email sent to <span className="font-medium text-slate-900">{verifyEmail}</span> before signing in.
+          </p>
+          <div className="flex justify-end">
+            <Button onClick={closeVerifyDialog}>Back to Login</Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

@@ -10,7 +10,7 @@ import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { calculateExpectedEndDate, getMonthOptions, getCurrentMonthYear, formatDate, formatTime, formatHours } from "@/lib/utils";
-import { Plus, Pencil, FileSpreadsheet } from "lucide-react";
+import { Plus, FileSpreadsheet } from "lucide-react";
 
 type RecordRow = TimeRecord;
 
@@ -276,29 +276,21 @@ export default function TimeRecordsPage() {
                 <tr className="border-b border-slate-100 bg-slate-50">
                   <th className="text-left px-4 py-3 font-semibold text-slate-600">Date</th>
                   <th className="text-left px-4 py-3 font-semibold text-slate-600">AM In</th>
-                  <th className="text-left px-4 py-3 font-semibold text-slate-600">AM Out</th>
-                  <th className="text-left px-4 py-3 font-semibold text-slate-600">PM In</th>
                   <th className="text-left px-4 py-3 font-semibold text-slate-600">PM Out</th>
-                  <th className="text-left px-4 py-3 font-semibold text-slate-600">Hours</th>
-                  <th className="text-right px-4 py-3" />
+                  <th className="text-left px-4 py-3 font-semibold text-slate-600">Total Hours</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {records.map((r) => (
-                  <tr key={r.id} className="hover:bg-slate-50 transition-colors">
+                  <tr
+                    key={r.id}
+                    className="hover:bg-slate-50 transition-colors cursor-pointer"
+                    onClick={() => openEdit(r)}
+                  >
                     <td className="px-4 py-3 font-medium text-slate-900">{formatDate(r.date)}</td>
                     <td className="px-4 py-3 text-slate-600">{formatTime(r.morning_time_in)}</td>
-                    <td className="px-4 py-3 text-slate-600">{formatTime(r.morning_time_out)}</td>
-                    <td className="px-4 py-3 text-slate-600">{formatTime(r.afternoon_time_in)}</td>
                     <td className="px-4 py-3 text-slate-600">{formatTime(r.afternoon_time_out)}</td>
                     <td className="px-4 py-3 text-slate-600">{formatHours(r.total_hours)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end">
-                        <button onClick={() => openEdit(r)} className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
-                          <Pencil size={15} />
-                        </button>
-                      </div>
-                    </td>
                   </tr>
                 ))}
               </tbody>
