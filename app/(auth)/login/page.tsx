@@ -141,6 +141,7 @@ export default function LoginPage() {
       email: normalizedEmail,
       password: registerPassword,
       options: {
+        emailRedirectTo: "https://subaycentral.vercel.app/login",
         data: {
           role: "intern",
           full_name: fullName,

@@ -40,33 +40,24 @@ export default function InternProfilePage() {
 
       const { data: timeRecords } = await supabase
         .from("time_records")
-        .select("morning_time_in, morning_time_out, afternoon_time_in, afternoon_time_out, time_in, time_out")
+        .select("total_hours")
         .eq("intern_deployment_id", dep?.id || "");
 
-      type TRRow = { morning_time_in: string | null; morning_time_out: string | null; afternoon_time_in: string | null; afternoon_time_out: string | null; time_in: string | null; time_out: string | null };
-      
-      function rangeHours(timeIn: string | null, timeOut: string | null): number {
-        if (!timeIn || !timeOut) return 0;
-        const inDate = new Date(`1970-01-01T${timeIn}:00`);
-        const outDate = new Date(`1970-01-01T${timeOut}:00`);
-        const diffMs = outDate.getTime() - inDate.getTime();
-        return diffMs > 0 ? diffMs / (1000 * 60 * 60) : 0;
-      }
-
-      const computedHours = (timeRecords ?? []).reduce((sum: number, r: TRRow) => {
-        const morningHours = rangeHours(r.morning_time_in, r.morning_time_out);
-        const afternoonHours = rangeHours(r.afternoon_time_in, r.afternoon_time_out);
-        const legacyHours = (morningHours === 0 && afternoonHours === 0)
-          ? rangeHours(r.time_in, r.time_out)
-          : 0;
-        return sum + morningHours + afternoonHours + legacyHours;
-      }, 0);
+      const accumulatedHoursFromLogs = Number(
+        ((timeRecords ?? []).reduce(
+          (sum: number, row: { total_hours: number | null }) => sum + Number(row.total_hours ?? 0),
+          0
+        )).toFixed(2)
+      );
+      const renderedHours = Number(
+        (dep?.rendered_hours ?? accumulatedHoursFromLogs).toFixed(2)
+      );
 
       const requiredHours = dep?.required_hours ?? dep?.deployments?.required_hours ?? 0;
       const computedExpectedEndDate = calculateExpectedEndDate(
         dep?.start_date ?? null,
         requiredHours,
-        computedHours,
+        renderedHours,
         currentProfile.duty_hours_per_day ?? 8
       );
 
@@ -77,7 +68,7 @@ export default function InternProfilePage() {
         student_id: currentProfile.student_id,
         start_date: dep?.start_date ?? null,
         expected_end_date: computedExpectedEndDate,
-        rendered_hours: Number(computedHours.toFixed(2)),
+        rendered_hours: renderedHours,
         required_hours: requiredHours,
         deployment_name: dep?.deployments?.name ?? "No Deployment",
         deployment_status: dep?.deployments?.status ?? "upcoming",

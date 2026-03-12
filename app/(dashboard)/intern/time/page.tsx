@@ -53,6 +53,7 @@ export default function TimeRecordsPage() {
   const [editing, setEditing] = useState<RecordRow | null>(null);
   const [form, setForm] = useState<FormData>(defaultForm);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -86,6 +87,44 @@ export default function TimeRecordsPage() {
   }, [profile, supabase, month, year]);
 
   useEffect(() => { load(); }, [load]);
+
+  async function syncDeploymentHours() {
+    if (!internDeploymentId || !profile) return;
+
+    const [{ data: deploymentRow }, { data: deploymentTimeRows }] = await Promise.all([
+      supabase
+        .from("intern_deployments")
+        .select("id, start_date, required_hours")
+        .eq("id", internDeploymentId)
+        .single(),
+      supabase
+        .from("time_records")
+        .select("total_hours")
+        .eq("intern_deployment_id", internDeploymentId),
+    ]);
+
+    const renderedHoursFromLogs = Number(
+      ((deploymentTimeRows ?? []).reduce(
+        (sum: number, row: { total_hours: number | null }) => sum + Number(row.total_hours ?? 0),
+        0
+      )).toFixed(2)
+    );
+
+    const expectedEndDate = calculateExpectedEndDate(
+      deploymentRow?.start_date,
+      deploymentRow?.required_hours,
+      renderedHoursFromLogs,
+      profile.duty_hours_per_day ?? 8
+    );
+
+    await supabase
+      .from("intern_deployments")
+      .update({
+        rendered_hours: renderedHoursFromLogs,
+        expected_end_date: expectedEndDate,
+      })
+      .eq("id", internDeploymentId);
+  }
 
   function exportAsExcelCsv() {
     if (records.length === 0) return;
@@ -197,39 +236,7 @@ export default function TimeRecordsPage() {
         if (err) throw err;
       }
 
-      const [{ data: deploymentRow }, { data: deploymentTimeRows }] = await Promise.all([
-        supabase
-          .from("intern_deployments")
-          .select("id, start_date, required_hours")
-          .eq("id", internDeploymentId)
-          .single(),
-        supabase
-          .from("time_records")
-          .select("total_hours")
-          .eq("intern_deployment_id", internDeploymentId),
-      ]);
-
-      const renderedHoursFromLogs = Number(
-        ((deploymentTimeRows ?? []).reduce(
-          (sum: number, row: { total_hours: number | null }) => sum + Number(row.total_hours ?? 0),
-          0
-        )).toFixed(2)
-      );
-
-      const expectedEndDate = calculateExpectedEndDate(
-        deploymentRow?.start_date,
-        deploymentRow?.required_hours,
-        renderedHoursFromLogs,
-        profile.duty_hours_per_day ?? 8
-      );
-
-      await supabase
-        .from("intern_deployments")
-        .update({
-          rendered_hours: renderedHoursFromLogs,
-          expected_end_date: expectedEndDate,
-        })
-        .eq("id", internDeploymentId);
+      await syncDeploymentHours();
 
       await load();
       setModalOpen(false);
@@ -240,12 +247,35 @@ export default function TimeRecordsPage() {
     }
   }
 
+  async function handleDelete() {
+    if (!editing) return;
+
+    const confirmed = window.confirm("Delete this time log?");
+    if (!confirmed) return;
+
+    setDeleting(true);
+    setError(null);
+    try {
+      const { error: deleteError } = await supabase.from("time_records").delete().eq("id", editing.id);
+      if (deleteError) throw deleteError;
+
+      await syncDeploymentHours();
+      await load();
+      setModalOpen(false);
+      setEditing(null);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to delete record");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Time Records</h1>
-          <p className="text-slate-500 text-sm">Track your morning and afternoon time logs each day</p>
+          <p className="text-slate-500 text-sm">Track your total rendered hours each day</p>
         </div>
         <div className="flex gap-3">
           <Select options={getMonthOptions()} value={month} onChange={(e) => setMonth(e.target.value)} />
@@ -275,8 +305,10 @@ export default function TimeRecordsPage() {
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50">
                   <th className="text-left px-4 py-3 font-semibold text-slate-600">Date</th>
-                  <th className="text-left px-4 py-3 font-semibold text-slate-600">AM In</th>
-                  <th className="text-left px-4 py-3 font-semibold text-slate-600">PM Out</th>
+                  <th className="hidden md:table-cell text-left px-4 py-3 font-semibold text-slate-600">AM In</th>
+                  <th className="hidden md:table-cell text-left px-4 py-3 font-semibold text-slate-600">AM Out</th>
+                  <th className="hidden md:table-cell text-left px-4 py-3 font-semibold text-slate-600">PM In</th>
+                  <th className="hidden md:table-cell text-left px-4 py-3 font-semibold text-slate-600">PM Out</th>
                   <th className="text-left px-4 py-3 font-semibold text-slate-600">Total Hours</th>
                 </tr>
               </thead>
@@ -288,8 +320,10 @@ export default function TimeRecordsPage() {
                     onClick={() => openEdit(r)}
                   >
                     <td className="px-4 py-3 font-medium text-slate-900">{formatDate(r.date)}</td>
-                    <td className="px-4 py-3 text-slate-600">{formatTime(r.morning_time_in)}</td>
-                    <td className="px-4 py-3 text-slate-600">{formatTime(r.afternoon_time_out)}</td>
+                    <td className="hidden md:table-cell px-4 py-3 text-slate-600">{formatTime(r.morning_time_in ?? r.time_in)}</td>
+                    <td className="hidden md:table-cell px-4 py-3 text-slate-600">{formatTime(r.morning_time_out)}</td>
+                    <td className="hidden md:table-cell px-4 py-3 text-slate-600">{formatTime(r.afternoon_time_in)}</td>
+                    <td className="hidden md:table-cell px-4 py-3 text-slate-600">{formatTime(r.afternoon_time_out ?? r.time_out)}</td>
                     <td className="px-4 py-3 text-slate-600">{formatHours(r.total_hours)}</td>
                   </tr>
                 ))}
@@ -330,7 +364,12 @@ export default function TimeRecordsPage() {
           </div>
           {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
           <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
+            {editing && (
+              <Button type="button" variant="danger" onClick={handleDelete} loading={deleting}>
+                Delete Time Log
+              </Button>
+            )}
+            {/* <Button type="button" variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button> */}
             <Button type="submit" loading={saving}>{editing ? "Save Changes" : "Add Time Record"}</Button>
           </div>
         </form>
