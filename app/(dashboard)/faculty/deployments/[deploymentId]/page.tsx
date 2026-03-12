@@ -13,6 +13,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
+import { enrollAssignedIntern } from "./actions";
 
 type EnrollmentRow = InternDeployment & {
   profiles?: Profile | null;
@@ -28,6 +29,21 @@ type EnrollmentForm = {
   agencyId: string;
   startDate: string;
 };
+
+function normalizeValue(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function normalizeProgram(value: string | null | undefined) {
+  const normalized = normalizeValue(value);
+  if (normalized === "bsit" || normalized === "bs information technology") {
+    return "bs information technology";
+  }
+  if (normalized === "bsis" || normalized === "bs information systems") {
+    return "bs information systems";
+  }
+  return normalized;
+}
 
 export default function FacultyDeploymentDetailPage() {
   const supabase = createClient();
@@ -48,7 +64,6 @@ export default function FacultyDeploymentDetailPage() {
     startDate: "",
   });
   const [internSearch, setInternSearch] = useState("");
-  const [agencySearch, setAgencySearch] = useState("");
 
   const [search, setSearch] = useState("");
   const [programFilter, setProgramFilter] = useState("");
@@ -98,11 +113,18 @@ export default function FacultyDeploymentDetailPage() {
         .from("profiles")
         .select("*")
         .eq("role", "intern")
-        .eq("program", profile.program)
-        .eq("section", profile.section)
         .order("full_name", { ascending: true });
 
-      setAssignedInterns((data as Profile[] | null) ?? []);
+      const facultyProgram = normalizeProgram(profile.program);
+      const facultySection = normalizeValue(profile.section);
+      const scoped = ((data as Profile[] | null) ?? []).filter((intern) => {
+        return (
+          normalizeProgram(intern.program) === facultyProgram &&
+          normalizeValue(intern.section) === facultySection
+        );
+      });
+
+      setAssignedInterns(scoped);
     }
 
     loadAssignedInterns();
@@ -111,7 +133,6 @@ export default function FacultyDeploymentDetailPage() {
   function openEnrollModal() {
     const today = new Date().toISOString().slice(0, 10);
     setInternSearch("");
-    setAgencySearch("");
     setEnrollmentForm({
       internId: "",
       agencyId: "",
@@ -126,12 +147,6 @@ export default function FacultyDeploymentDetailPage() {
       (intern) => `${intern.full_name} (${intern.email})` === value
     );
     setEnrollmentForm((current) => ({ ...current, internId: matched?.id ?? "" }));
-  }
-
-  function onTypeAgency(value: string) {
-    setAgencySearch(value);
-    const matched = agencies.find((agency) => agency.name === value);
-    setEnrollmentForm((current) => ({ ...current, agencyId: matched?.id ?? "" }));
   }
 
   async function saveEnrollment() {
@@ -159,20 +174,16 @@ export default function FacultyDeploymentDetailPage() {
       dutyHoursPerDay
     );
 
-    const { error } = await supabase
-      .from("intern_deployments")
-      .insert({
-        intern_id: enrollmentForm.internId,
-        deployment_id: deployment.id,
-        agency_id: enrollmentForm.agencyId,
-        start_date: enrollmentForm.startDate,
-        expected_end_date: expectedEndDate,
-        required_hours: deployment.required_hours,
-        status: "active",
-        rendered_hours: 0,
-      });
-    if (error) {
-      alert(error.message);
+    const result = await enrollAssignedIntern({
+      deploymentId: deployment.id,
+      internId: enrollmentForm.internId,
+      agencyId: enrollmentForm.agencyId,
+      startDate: enrollmentForm.startDate,
+      expectedEndDate,
+    });
+
+    if (result.error) {
+      alert(result.error);
       setSavingEnrollment(false);
       return;
     }
@@ -255,45 +266,27 @@ export default function FacultyDeploymentDetailPage() {
 
   const internOptions = useMemo(() => {
     const q = internSearch.trim().toLowerCase();
-    const internList = unassignedInterns.filter((intern) => {
-      if (!q) return true;
-      return (
-        (intern.full_name ?? "").toLowerCase().includes(q) ||
-        (intern.email ?? "").toLowerCase().includes(q) ||
-        (intern.student_id ?? "").toLowerCase().includes(q)
-      );
-    });
-
-    if (internList.length === 0) {
-      return [{ value: "", label: "No unassigned intern found" }];
-    }
-
-    return internList.map((intern) => ({
+    return unassignedInterns
+      .filter((intern) => {
+        if (!q) return true;
+        return (
+          (intern.full_name ?? "").toLowerCase().includes(q) ||
+          (intern.email ?? "").toLowerCase().includes(q) ||
+          (intern.student_id ?? "").toLowerCase().includes(q)
+        );
+      })
+      .map((intern) => ({
       value: intern.id,
       label: `${intern.full_name} (${intern.email})`,
     }));
   }, [unassignedInterns, internSearch]);
 
   const assignAgencyOptions = useMemo(() => {
-    const q = agencySearch.trim().toLowerCase();
-    const agencyList = agencies.filter((agency) => {
-      if (!q) return true;
-      return (
-        agency.name.toLowerCase().includes(q) ||
-        (agency.address ?? "").toLowerCase().includes(q) ||
-        (agency.contact_person ?? "").toLowerCase().includes(q)
-      );
-    });
-
-    if (agencyList.length === 0) {
-      return [{ value: "", label: "No agency found" }];
-    }
-
-    return agencyList.map((agency) => ({
+    return agencies.map((agency) => ({
       value: agency.id,
       label: agency.name,
     }));
-  }, [agencies, agencySearch]);
+  }, [agencies]);
 
   const noUnassignedInterns = unassignedInterns.length === 0;
 
@@ -419,34 +412,32 @@ export default function FacultyDeploymentDetailPage() {
           <div className="space-y-4">
             <Input
               label="Intern"
-              placeholder="Type name, email, or student ID"
               value={internSearch}
               onChange={(event) => onTypeIntern(event.target.value)}
+              placeholder="Type intern name, email, or student ID"
               list="intern-suggestions"
-              required
               disabled={noUnassignedInterns}
-              helperText={noUnassignedInterns ? "No unassigned interns available for your section." : "Suggestions are limited to your assigned unassigned interns."}
             />
             <datalist id="intern-suggestions">
-              {internOptions.map((option) => (
-                <option key={option.value} value={option.label} />
+              {internOptions.map((option, index) => (
+                <option key={`${option.value}-${index}`} value={option.label} />
               ))}
             </datalist>
+            <p className="text-xs text-slate-500 -mt-2">
+              {noUnassignedInterns
+                ? "No available interns to enroll right now."
+                : "Type to search. Suggestions show only your assigned interns by program and section."}
+            </p>
 
-            <Input
+            <Select
               label="Agency"
-              placeholder="Type agency name"
-              value={agencySearch}
-              onChange={(event) => onTypeAgency(event.target.value)}
-              list="agency-suggestions"
-              required
-              helperText="Start typing to see agency suggestions."
+              value={enrollmentForm.agencyId}
+              onChange={(event) =>
+                setEnrollmentForm((current) => ({ ...current, agencyId: event.target.value }))
+              }
+              options={[{ value: "", label: "Select agency" }, ...assignAgencyOptions]}
             />
-            <datalist id="agency-suggestions">
-              {assignAgencyOptions.map((option) => (
-                <option key={option.value} value={option.label} />
-              ))}
-            </datalist>
+            <p className="text-xs text-slate-500 -mt-2">Select the agency where the intern will be deployed.</p>
 
             <Input
               label="Start Date"

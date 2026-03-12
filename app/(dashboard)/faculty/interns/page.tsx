@@ -30,6 +30,24 @@ type EditDeploymentForm = {
   status: string;
 };
 
+function normalizeValue(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function normalizeProgram(value: string | null | undefined) {
+  const normalized = normalizeValue(value);
+
+  if (normalized === "bsit" || normalized === "bs information technology") {
+    return "bs information technology";
+  }
+
+  if (normalized === "bsis" || normalized === "bs information systems") {
+    return "bs information systems";
+  }
+
+  return normalized;
+}
+
 export default function FacultyInternsPage() {
   const supabase = createClient();
   const { profile } = useAuth();
@@ -59,26 +77,63 @@ export default function FacultyInternsPage() {
       return;
     }
 
-    const [{ data: internProfiles }, { data: internDeps }, { data: agencyList }] = await Promise.all([
+    const [{ data: internProfiles }, { data: facultyDeployments }, { data: agencyList }] = await Promise.all([
       supabase
         .from("profiles")
         .select("*")
         .eq("role", "intern")
-        .eq("program", currentProfile.program)
-        .eq("section", currentProfile.section)
         .order("full_name", { ascending: true }),
       supabase
-        .from("intern_deployments")
-        .select("*, profiles(*), partner_agencies(*)")
-        .order("created_at", { ascending: false }),
+        .from("deployment_faculty")
+        .select("deployment_id")
+        .eq("faculty_id", currentProfile.id),
       supabase.from("partner_agencies").select("*").order("name"),
     ]);
 
-    const scopedProfiles = (internProfiles as Profile[]) ?? [];
-    const scopedInternIds = new Set(scopedProfiles.map((intern) => intern.id));
-    const scopedDeployments = ((internDeps as InternDeploymentRow[]) ?? []).filter((deployment) =>
-      scopedInternIds.has(deployment.intern_id)
+    const facultyProgram = normalizeProgram(currentProfile.program);
+    const facultySection = normalizeValue(currentProfile.section);
+
+    const scopedProfiles = ((internProfiles as Profile[]) ?? []).filter((intern) => {
+      return (
+        normalizeProgram(intern.program) === facultyProgram &&
+        normalizeValue(intern.section) === facultySection
+      );
+    });
+    const scopedInternIds = scopedProfiles.map((intern) => intern.id);
+
+    if (scopedInternIds.length === 0) {
+      setInterns([]);
+      setAgencies((agencyList as PartnerAgency[]) ?? []);
+      setLoading(false);
+      return;
+    }
+
+    const assignedDeploymentIds = Array.from(
+      new Set(((facultyDeployments as { deployment_id: string }[] | null) ?? []).map((item) => item.deployment_id))
     );
+
+    const { data: internDeps } = await supabase
+      .from("intern_deployments")
+      .select("*, profiles(*), partner_agencies(*)")
+      .in("intern_id", scopedInternIds)
+      .order("created_at", { ascending: false });
+
+    const scopedDeployments = ((internDeps as InternDeploymentRow[]) ?? []).filter((deployment) => {
+      const matchesProgramSection =
+        deployment.profiles?.role === "intern" &&
+        normalizeProgram(deployment.profiles?.program) === facultyProgram &&
+        normalizeValue(deployment.profiles?.section) === facultySection;
+
+      if (!matchesProgramSection) return false;
+
+      // If this faculty has explicit deployment assignments, scope to those deployments.
+      if (assignedDeploymentIds.length > 0) {
+        return assignedDeploymentIds.includes(deployment.deployment_id);
+      }
+
+      // Fallback: show interns in the same program/section even without assignment rows.
+      return true;
+    });
 
     const latestDeploymentByIntern = new Map<string, InternDeploymentRow>();
     for (const deployment of scopedDeployments) {
@@ -88,9 +143,9 @@ export default function FacultyInternsPage() {
     }
 
     const rows: InternRow[] = scopedProfiles.map((intern) => ({
-      intern,
-      deployment: latestDeploymentByIntern.get(intern.id) ?? null,
-    }));
+        intern,
+        deployment: latestDeploymentByIntern.get(intern.id) ?? null,
+      }));
 
     setInterns(rows);
     setAgencies((agencyList as PartnerAgency[]) ?? []);

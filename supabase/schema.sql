@@ -160,7 +160,32 @@ $$ LANGUAGE sql SECURITY DEFINER STABLE;
 -- Auto-create profile after auth signup
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  incoming_role TEXT;
+  resolved_role user_role := 'intern';
+  resolved_full_name TEXT;
 BEGIN
+  incoming_role := NEW.raw_user_meta_data->>'role';
+  IF incoming_role IN ('admin', 'faculty', 'intern') THEN
+    resolved_role := incoming_role::user_role;
+  END IF;
+
+  resolved_full_name := NULLIF(TRIM(COALESCE(NEW.raw_user_meta_data->>'full_name', '')), '');
+  IF resolved_full_name IS NULL THEN
+    resolved_full_name := NULLIF(
+      TRIM(CONCAT_WS(
+        ' ',
+        NULLIF(NEW.raw_user_meta_data->>'first_name', ''),
+        NULLIF(NEW.raw_user_meta_data->>'middle_name', ''),
+        NULLIF(NEW.raw_user_meta_data->>'last_name', '')
+      )),
+      ''
+    );
+  END IF;
+  IF resolved_full_name IS NULL THEN
+    resolved_full_name := COALESCE(NULLIF(SPLIT_PART(NEW.email, '@', 1), ''), 'New User');
+  END IF;
+
   INSERT INTO profiles (
     id,
     full_name,
@@ -175,7 +200,7 @@ BEGIN
   )
   VALUES (
     NEW.id,
-    COALESCE(NEW.raw_user_meta_data->>'full_name', ''),
+    resolved_full_name,
     NEW.raw_user_meta_data->>'first_name',
     NEW.raw_user_meta_data->>'middle_name',
     NEW.raw_user_meta_data->>'last_name',
@@ -183,7 +208,7 @@ BEGIN
     NEW.raw_user_meta_data->>'section',
     NEW.raw_user_meta_data->>'student_id',
     NEW.email,
-    COALESCE((NEW.raw_user_meta_data->>'role')::user_role, 'intern')
+    resolved_role
   );
   RETURN NEW;
 END;
