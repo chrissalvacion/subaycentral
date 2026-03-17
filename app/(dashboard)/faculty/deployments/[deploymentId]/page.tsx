@@ -56,6 +56,8 @@ export default function FacultyDeploymentDetailPage() {
   const [enrollments, setEnrollments] = useState<EnrollmentRow[]>([]);
   const [agencies, setAgencies] = useState<PartnerAgency[]>([]);
   const [assignedInterns, setAssignedInterns] = useState<Profile[]>([]);
+  const [agencyAssignedInternIds, setAgencyAssignedInternIds] = useState<string[]>([]);
+  const [loadingAvailableInterns, setLoadingAvailableInterns] = useState(true);
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
   const [savingEnrollment, setSavingEnrollment] = useState(false);
   const [enrollmentForm, setEnrollmentForm] = useState<EnrollmentForm>({
@@ -104,8 +106,12 @@ export default function FacultyDeploymentDetailPage() {
 
   useEffect(() => {
     async function loadAssignedInterns() {
+      setLoadingAvailableInterns(true);
+
       if (!profile?.program || !profile?.section) {
         setAssignedInterns([]);
+        setAgencyAssignedInternIds([]);
+        setLoadingAvailableInterns(false);
         return;
       }
 
@@ -124,7 +130,33 @@ export default function FacultyDeploymentDetailPage() {
         );
       });
 
+      if (scoped.length === 0) {
+        setAssignedInterns([]);
+        setAgencyAssignedInternIds([]);
+        setLoadingAvailableInterns(false);
+        return;
+      }
+
+      const { data: agencyAssignedRows } = await supabase
+        .from("intern_deployments")
+        .select("intern_id")
+        .in(
+          "intern_id",
+          scoped.map((intern) => intern.id)
+        )
+        .not("agency_id", "is", null);
+
       setAssignedInterns(scoped);
+      setAgencyAssignedInternIds(
+        Array.from(
+          new Set(
+            ((agencyAssignedRows as Pick<InternDeployment, "intern_id">[] | null) ?? []).map(
+              (row) => row.intern_id
+            )
+          )
+        )
+      );
+      setLoadingAvailableInterns(false);
     }
 
     loadAssignedInterns();
@@ -143,7 +175,7 @@ export default function FacultyDeploymentDetailPage() {
 
   function onTypeIntern(value: string) {
     setInternSearch(value);
-    const matched = unassignedInterns.find(
+    const matched = availableInterns.find(
       (intern) => `${intern.full_name} (${intern.email})` === value
     );
     setEnrollmentForm((current) => ({ ...current, internId: matched?.id ?? "" }));
@@ -259,14 +291,23 @@ export default function FacultyDeploymentDetailPage() {
     [enrollments]
   );
 
-  const unassignedInterns = useMemo(
-    () => assignedInterns.filter((intern) => !enrolledInternIds.has(intern.id)),
-    [assignedInterns, enrolledInternIds]
+  const internsWithAgencyAssignment = useMemo(
+    () => new Set(agencyAssignedInternIds),
+    [agencyAssignedInternIds]
+  );
+
+  const availableInterns = useMemo(
+    () =>
+      assignedInterns.filter(
+        (intern) =>
+          !enrolledInternIds.has(intern.id) && !internsWithAgencyAssignment.has(intern.id)
+      ),
+    [assignedInterns, enrolledInternIds, internsWithAgencyAssignment]
   );
 
   const internOptions = useMemo(() => {
     const q = internSearch.trim().toLowerCase();
-    return unassignedInterns
+    return availableInterns
       .filter((intern) => {
         if (!q) return true;
         return (
@@ -279,7 +320,7 @@ export default function FacultyDeploymentDetailPage() {
       value: intern.id,
       label: `${intern.full_name} (${intern.email})`,
     }));
-  }, [unassignedInterns, internSearch]);
+  }, [availableInterns, internSearch]);
 
   const assignAgencyOptions = useMemo(() => {
     return agencies.map((agency) => ({
@@ -288,7 +329,7 @@ export default function FacultyDeploymentDetailPage() {
     }));
   }, [agencies]);
 
-  const noUnassignedInterns = unassignedInterns.length === 0;
+  const noAvailableInterns = !loadingAvailableInterns && availableInterns.length === 0;
 
   return (
     <div className="space-y-6">
@@ -305,13 +346,70 @@ export default function FacultyDeploymentDetailPage() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Industry Deployment Students</h1>
             <p className="text-sm text-slate-500">
-              {deployment ? deployment.name : "Deployment"} - enrolled students regardless of program and section
+              {deployment ? deployment.name : "Deployment"} - enrolled students for your assigned program and section
             </p>
           </div>
-          <Button icon={<PlusCircle size={14} />} onClick={openEnrollModal}>
-            Enroll Assigned Student
+          <Button
+            icon={<PlusCircle size={14} />}
+            onClick={openEnrollModal}
+            disabled={loadingAvailableInterns || !profile?.program || !profile?.section || noAvailableInterns}
+          >
+            Enroll Available Student
           </Button>
         </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100">
+          <h2 className="font-semibold text-slate-900">Program and Section Interns</h2>
+          <p className="text-sm text-slate-500 mt-1">
+            Interns who match your assigned program and section.
+          </p>
+        </div>
+
+        {!profile?.program || !profile?.section ? (
+          <div className="p-8 text-center text-sm text-slate-400">
+            Your faculty profile needs both program and section before interns can be listed here.
+          </div>
+        ) : loadingAvailableInterns ? (
+          <div className="p-8 flex justify-center">
+            <LoadingSpinner />
+          </div>
+        ) : assignedInterns.length === 0 ? (
+          <div className="p-8 text-center text-sm text-slate-400">
+            No interns found for your assigned program and section.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50">
+                  <th className="text-left px-4 py-3 font-semibold text-slate-600">Intern</th>
+                  <th className="text-left px-4 py-3 font-semibold text-slate-600">Student ID</th>
+                  <th className="text-left px-4 py-3 font-semibold text-slate-600">Program</th>
+                  <th className="text-left px-4 py-3 font-semibold text-slate-600">Section</th>
+                  <th className="text-left px-4 py-3 font-semibold text-slate-600">Agency Assignment</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {assignedInterns.map((intern) => (
+                  <tr key={intern.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-slate-900">{intern.full_name}</p>
+                      <p className="text-xs text-slate-500">{intern.email}</p>
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">{intern.student_id ?? "-"}</td>
+                    <td className="px-4 py-3 text-slate-700">{intern.program ?? "-"}</td>
+                    <td className="px-4 py-3 text-slate-700">{intern.section ?? "-"}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {internsWithAgencyAssignment.has(intern.id) ? "Assigned" : "Not Assigned"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 md:p-5 space-y-4">
@@ -416,7 +514,7 @@ export default function FacultyDeploymentDetailPage() {
               onChange={(event) => onTypeIntern(event.target.value)}
               placeholder="Type intern name, email, or student ID"
               list="intern-suggestions"
-              disabled={noUnassignedInterns}
+              disabled={noAvailableInterns}
             />
             <datalist id="intern-suggestions">
               {internOptions.map((option, index) => (
@@ -424,9 +522,9 @@ export default function FacultyDeploymentDetailPage() {
               ))}
             </datalist>
             <p className="text-xs text-slate-500 -mt-2">
-              {noUnassignedInterns
+              {noAvailableInterns
                 ? "No available interns to enroll right now."
-                : "Type to search. Suggestions show only your assigned interns by program and section."}
+                : "Type to search. Suggestions show only interns in your program and section with no agency assignment."}
             </p>
 
             <Select
@@ -451,7 +549,7 @@ export default function FacultyDeploymentDetailPage() {
           </div>
 
           <div className="flex justify-end">
-            <Button onClick={saveEnrollment} loading={savingEnrollment} disabled={noUnassignedInterns}>
+            <Button onClick={saveEnrollment} loading={savingEnrollment} disabled={noAvailableInterns}>
               Save Enrollment
             </Button>
           </div>

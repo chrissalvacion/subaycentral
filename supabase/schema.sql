@@ -304,6 +304,8 @@ CREATE POLICY "Admin deletes profiles"        ON profiles FOR DELETE USING (get_
 CREATE POLICY "User updates own profile"      ON profiles FOR UPDATE USING (id = auth.uid());
 CREATE POLICY "Faculty reads assigned interns" ON profiles FOR SELECT USING (
   get_current_user_role() = 'faculty' AND
+  normalize_program_value(get_current_user_program()) <> '' AND
+  normalize_text_value(get_current_user_section()) <> '' AND
   role = 'intern' AND
   normalize_program_value(program) = normalize_program_value(get_current_user_program()) AND
   normalize_text_value(section) = normalize_text_value(get_current_user_section())
@@ -329,6 +331,8 @@ CREATE POLICY "Admin manages dep_faculty" ON deployment_faculty FOR ALL   USING 
 CREATE POLICY "Admin manages intern_deployments" ON intern_deployments FOR ALL USING (get_current_user_role() = 'admin');
 CREATE POLICY "Faculty reads own deployments' interns" ON intern_deployments FOR SELECT USING (
   get_current_user_role() = 'faculty' AND
+  normalize_program_value(get_current_user_program()) <> '' AND
+  normalize_text_value(get_current_user_section()) <> '' AND
   intern_id IN (
     SELECT p.id
     FROM profiles p
@@ -339,6 +343,8 @@ CREATE POLICY "Faculty reads own deployments' interns" ON intern_deployments FOR
 );
 CREATE POLICY "Faculty updates intern_deployments" ON intern_deployments FOR UPDATE USING (
   get_current_user_role() = 'faculty' AND
+  normalize_program_value(get_current_user_program()) <> '' AND
+  normalize_text_value(get_current_user_section()) <> '' AND
   intern_id IN (
     SELECT p.id
     FROM profiles p
@@ -353,6 +359,8 @@ CREATE POLICY "Intern reads own deployments" ON intern_deployments FOR SELECT US
 CREATE POLICY "Intern manages own daily records" ON daily_records FOR ALL USING (intern_id = auth.uid());
 CREATE POLICY "Faculty reads assigned interns daily" ON daily_records FOR SELECT USING (
   get_current_user_role() = 'faculty' AND
+  normalize_program_value(get_current_user_program()) <> '' AND
+  normalize_text_value(get_current_user_section()) <> '' AND
   intern_id IN (
     SELECT p.id
     FROM profiles p
@@ -367,6 +375,8 @@ CREATE POLICY "Admin reads all daily records" ON daily_records FOR SELECT USING 
 CREATE POLICY "Intern manages own time records"   ON time_records FOR ALL USING (intern_id = auth.uid());
 CREATE POLICY "Faculty reads assigned time records" ON time_records FOR SELECT USING (
   get_current_user_role() = 'faculty' AND
+  normalize_program_value(get_current_user_program()) <> '' AND
+  normalize_text_value(get_current_user_section()) <> '' AND
   intern_id IN (
     SELECT p.id
     FROM profiles p

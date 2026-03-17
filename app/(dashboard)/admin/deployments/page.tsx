@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { Deployment, Program, Profile, InternDeployment } from "@/lib/types";
@@ -44,6 +44,21 @@ const defaultForm: DeploymentForm = {
   status: "upcoming",
 };
 
+function normalizeValue(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function normalizeProgram(value: string | null | undefined) {
+  const normalized = normalizeValue(value);
+  if (normalized === "bsit" || normalized === "bs information technology") {
+    return "bs information technology";
+  }
+  if (normalized === "bsis" || normalized === "bs information systems") {
+    return "bs information systems";
+  }
+  return normalized;
+}
+
 export default function DeploymentsPage() {
   const supabase = createClient();
   const [deployments, setDeployments] = useState<Deployment[]>([]);
@@ -61,18 +76,29 @@ export default function DeploymentsPage() {
   const [internModalOpen, setInternModalOpen] = useState(false);
   const [internTarget, setInternTarget] = useState<Deployment | null>(null);
   const [enrolledInterns, setEnrolledInterns] = useState<InternDeployment[]>([]);
+  const [agencyAssignedInternIds, setAgencyAssignedInternIds] = useState<string[]>([]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [{ data: deps }, { data: progs }, { data: interns }] =
+    const [{ data: deps }, { data: progs }, { data: interns }, { data: agencyAssignedRows }] =
       await Promise.all([
         supabase.from("deployments").select("*, programs(*)").order("created_at", { ascending: false }),
         supabase.from("programs").select("*").order("name"),
         supabase.from("profiles").select("*").eq("role", "intern").order("full_name"),
+        supabase.from("intern_deployments").select("intern_id").not("agency_id", "is", null),
       ]);
     if (deps) setDeployments(deps as Deployment[]);
     if (progs) setPrograms(progs as Program[]);
     if (interns) setAllInterns(interns as Profile[]);
+    if (agencyAssignedRows) {
+      setAgencyAssignedInternIds(
+        Array.from(
+          new Set(
+            (agencyAssignedRows as Pick<InternDeployment, "intern_id">[]).map((row) => row.intern_id)
+          )
+        )
+      );
+    }
     setLoading(false);
   }, [supabase]);
 
@@ -154,6 +180,24 @@ export default function DeploymentsPage() {
 
   async function enrollIntern(internId: string) {
     if (!internTarget) return;
+    if (!availableInterns.some((intern) => intern.id === internId)) {
+      alert("This intern is not currently available for enrollment.");
+      return;
+    }
+
+    const { data: existingAgencyAssignment } = await supabase
+      .from("intern_deployments")
+      .select("id")
+      .eq("intern_id", internId)
+      .not("agency_id", "is", null)
+      .limit(1);
+
+    if (((existingAgencyAssignment as Pick<InternDeployment, "id">[] | null) ?? []).length > 0) {
+      alert("This intern is already assigned to an agency.");
+      await loadData();
+      return;
+    }
+
     const { error: err } = await supabase.from("intern_deployments").insert({
       intern_id: internId,
       deployment_id: internTarget.id,
@@ -178,6 +222,29 @@ export default function DeploymentsPage() {
     { value: "", label: "No program" },
     ...programs.map((p) => ({ value: p.id, label: p.name })),
   ];
+
+  const enrolledInternIds = useMemo(
+    () => new Set(enrolledInterns.map((intern) => intern.intern_id)),
+    [enrolledInterns]
+  );
+
+  const internsWithAgencyAssignment = useMemo(
+    () => new Set(agencyAssignedInternIds),
+    [agencyAssignedInternIds]
+  );
+
+  const availableInterns = useMemo(() => {
+    const targetProgram = normalizeProgram(internTarget?.programs?.name ?? null);
+
+    return allInterns.filter((intern) => {
+      const matchesProgram = !targetProgram || normalizeProgram(intern.program) === targetProgram;
+      return (
+        matchesProgram &&
+        !enrolledInternIds.has(intern.id) &&
+        !internsWithAgencyAssignment.has(intern.id)
+      );
+    });
+  }, [allInterns, enrolledInternIds, internTarget, internsWithAgencyAssignment]);
 
   return (
     <div className="space-y-6">
@@ -298,16 +365,26 @@ export default function DeploymentsPage() {
           <div>
             <p className="text-sm font-medium text-slate-700 mb-2">Add Intern</p>
             <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden max-h-48 overflow-y-auto">
-              {allInterns
-                .filter((i) => !enrolledInterns.some((e) => e.intern_id === i.id))
-                .map((i) => (
+              {availableInterns.length === 0 ? (
+                <p className="px-4 py-3 text-sm text-slate-400">
+                  No interns are available for this deployment. Only interns in the deployment program with no agency assignment are listed.
+                </p>
+              ) : (
+                availableInterns.map((i) => (
                   <div key={i.id} className="flex items-center justify-between px-4 py-2.5">
-                    <span className="text-sm text-slate-800">{i.full_name}</span>
+                    <div>
+                      <p className="text-sm text-slate-800">{i.full_name}</p>
+                      <p className="text-xs text-slate-500">
+                        {i.program ?? "No program"}
+                        {i.section ? ` • ${i.section}` : ""}
+                      </p>
+                    </div>
                     <Button size="sm" variant="outline" onClick={() => enrollIntern(i.id)}>
                       Enroll
                     </Button>
                   </div>
-                ))}
+                ))
+              )}
             </div>
           </div>
 

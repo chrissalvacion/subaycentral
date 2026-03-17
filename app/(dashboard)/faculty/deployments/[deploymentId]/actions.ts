@@ -111,6 +111,18 @@ export async function enrollAssignedIntern(input: EnrollInput) {
     return { error: "This intern is already enrolled in this deployment." };
   }
 
+  const { data: existingAgencyAssignment } = await admin
+    .from("intern_deployments")
+    .select("id")
+    .eq("intern_id", input.internId)
+    .not("agency_id", "is", null)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingAgencyAssignment) {
+    return { error: "This intern is already assigned to an agency." };
+  }
+
   const { error: insertError } = await admin.from("intern_deployments").insert({
     intern_id: input.internId,
     deployment_id: input.deploymentId,
