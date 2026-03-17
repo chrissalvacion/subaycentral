@@ -14,8 +14,28 @@ import { Plus, FileSpreadsheet } from "lucide-react";
 
 type RecordRow = TimeRecord;
 
+function getMonthRange(year: string, month: string) {
+  const y = Number(year);
+  const m = Number(month);
+
+  if (!Number.isInteger(y) || !Number.isInteger(m) || m < 1 || m > 12) {
+    return null;
+  }
+
+  const start = `${year}-${month.padStart(2, "0")}-01`;
+  const nextMonth = new Date(Date.UTC(y, m, 1));
+  const nextMonthYear = String(nextMonth.getUTCFullYear());
+  const nextMonthValue = String(nextMonth.getUTCMonth() + 1).padStart(2, "0");
+  const endExclusive = `${nextMonthYear}-${nextMonthValue}-01`;
+
+  return { start, endExclusive };
+}
+
+type DutyType = "full" | "half_am" | "half_pm";
+
 type FormData = {
   date: string;
+  dutyType: DutyType;
   morning_time_in: string;
   morning_time_out: string;
   afternoon_time_in: string;
@@ -24,6 +44,7 @@ type FormData = {
 
 const defaultForm: FormData = {
   date: "",
+  dutyType: "full",
   morning_time_in: "",
   morning_time_out: "",
   afternoon_time_in: "",
@@ -36,19 +57,18 @@ function computeRangeHours(timeIn: string, timeOut: string) {
   const outDate = new Date(`1970-01-01T${timeOut}:00`);
   const diffMs = outDate.getTime() - inDate.getTime();
   if (diffMs <= 0) return -1;
-  return Number((diffMs / (1000 * 60 * 60)).toFixed(2));
+  return Math.floor(diffMs / (1000 * 60 * 60));
 }
 
 export default function TimeRecordsPage() {
   const supabase = createClient();
   const { profile } = useAuth();
-  const current = getCurrentMonthYear();
 
   const [internDeploymentId, setInternDeploymentId] = useState<string | null>(null);
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [month, setMonth] = useState(current.month);
-  const [year, setYear] = useState(current.year);
+  const [month, setMonth] = useState("");
+  const [year, setYear] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<RecordRow | null>(null);
   const [form, setForm] = useState<FormData>(defaultForm);
@@ -56,8 +76,17 @@ export default function TimeRecordsPage() {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    const current = getCurrentMonthYear();
+    setMonth(current.month);
+    setYear(current.year);
+  }, []);
+
   const load = useCallback(async () => {
-    if (!profile) return;
+    if (!profile || !month || !year) return;
+    const range = getMonthRange(year, month);
+    if (!range) return;
+
     const currentProfile = profile;
     setLoading(true);
     const { data: dep } = await supabase
@@ -79,8 +108,8 @@ export default function TimeRecordsPage() {
       .from("time_records")
       .select("*")
       .eq("intern_deployment_id", dep.id)
-      .gte("date", `${year}-${month}-01`)
-      .lte("date", `${year}-${month}-31`)
+      .gte("date", range.start)
+      .lt("date", range.endExclusive)
       .order("date", { descending: false });
     setRecords((data as RecordRow[]) ?? []);
     setLoading(false);
@@ -104,17 +133,19 @@ export default function TimeRecordsPage() {
     ]);
 
     const renderedHoursFromLogs = Number(
-      ((deploymentTimeRows ?? []).reduce(
-        (sum: number, row: { total_hours: number | null }) => sum + Number(row.total_hours ?? 0),
+      (deploymentTimeRows ?? []).reduce(
+        (sum: number, row: { total_hours: number | null }) =>
+          sum + Math.floor(Number(row.total_hours ?? 0)),
         0
-      )).toFixed(2)
+      )
     );
 
     const expectedEndDate = calculateExpectedEndDate(
       deploymentRow?.start_date,
       deploymentRow?.required_hours,
       renderedHoursFromLogs,
-      profile.duty_hours_per_day ?? 8
+      profile.duty_hours_per_day ?? 8,
+      profile.duty_days_per_week ?? 5
     );
 
     await supabase
@@ -163,8 +194,14 @@ export default function TimeRecordsPage() {
 
   function openEdit(r: RecordRow) {
     setEditing(r);
+    const hasMorning = Boolean(r.morning_time_in || r.time_in);
+    const hasAfternoon = Boolean(r.afternoon_time_in);
+    let dutyType: DutyType = "full";
+    if (hasMorning && !hasAfternoon) dutyType = "half_am";
+    else if (!hasMorning && hasAfternoon) dutyType = "half_pm";
     setForm({
       date: r.date,
+      dutyType,
       morning_time_in: r.morning_time_in ?? r.time_in ?? "",
       morning_time_out: r.morning_time_out ?? "",
       afternoon_time_in: r.afternoon_time_in ?? "",
@@ -179,39 +216,42 @@ export default function TimeRecordsPage() {
     if (!profile || !internDeploymentId) return;
     const currentProfile = profile;
 
-    const morningComplete = Boolean(form.morning_time_in && form.morning_time_out);
-    const afternoonComplete = Boolean(form.afternoon_time_in && form.afternoon_time_out);
+    const showMorning = form.dutyType === "full" || form.dutyType === "half_am";
+    const showAfternoon = form.dutyType === "full" || form.dutyType === "half_pm";
 
-    if (!morningComplete && !afternoonComplete) {
-      setError("Please provide complete morning or afternoon time in/out.");
+    const morningComplete = !showMorning || Boolean(form.morning_time_in && form.morning_time_out);
+    const afternoonComplete = !showAfternoon || Boolean(form.afternoon_time_in && form.afternoon_time_out);
+
+    if (!morningComplete) {
+      setError("Please provide both morning time in and time out.");
       return;
     }
 
-    if ((form.morning_time_in && !form.morning_time_out) || (!form.morning_time_in && form.morning_time_out)) {
-      setError("Morning time in and time out must both be provided.");
+    if (!afternoonComplete) {
+      setError("Please provide both afternoon time in and time out.");
       return;
     }
 
-    if ((form.afternoon_time_in && !form.afternoon_time_out) || (!form.afternoon_time_in && form.afternoon_time_out)) {
-      setError("Afternoon time in and time out must both be provided.");
-      return;
-    }
+    const effectiveMorningIn = showMorning ? form.morning_time_in : "";
+    const effectiveMorningOut = showMorning ? form.morning_time_out : "";
+    const effectiveAfternoonIn = showAfternoon ? form.afternoon_time_in : "";
+    const effectiveAfternoonOut = showAfternoon ? form.afternoon_time_out : "";
 
-    const morningHours = computeRangeHours(form.morning_time_in, form.morning_time_out);
+    const morningHours = computeRangeHours(effectiveMorningIn, effectiveMorningOut);
     if (morningHours < 0) {
       setError("Morning time out must be later than morning time in.");
       return;
     }
 
-    const afternoonHours = computeRangeHours(form.afternoon_time_in, form.afternoon_time_out);
+    const afternoonHours = computeRangeHours(effectiveAfternoonIn, effectiveAfternoonOut);
     if (afternoonHours < 0) {
       setError("Afternoon time out must be later than afternoon time in.");
       return;
     }
 
-    const totalHours = Number((morningHours + afternoonHours).toFixed(2));
-    const legacyTimeIn = form.morning_time_in || form.afternoon_time_in;
-    const legacyTimeOut = form.afternoon_time_out || form.morning_time_out;
+    const totalHours = morningHours + afternoonHours;
+    const legacyTimeIn = effectiveMorningIn || effectiveAfternoonIn;
+    const legacyTimeOut = effectiveAfternoonOut || effectiveMorningOut;
 
     setSaving(true);
     setError(null);
@@ -219,10 +259,10 @@ export default function TimeRecordsPage() {
       intern_id: currentProfile.id,
       intern_deployment_id: internDeploymentId,
       date: form.date,
-      morning_time_in: form.morning_time_in || null,
-      morning_time_out: form.morning_time_out || null,
-      afternoon_time_in: form.afternoon_time_in || null,
-      afternoon_time_out: form.afternoon_time_out || null,
+      morning_time_in: effectiveMorningIn || null,
+      morning_time_out: effectiveMorningOut || null,
+      afternoon_time_in: effectiveAfternoonIn || null,
+      afternoon_time_out: effectiveAfternoonOut || null,
       time_in: legacyTimeIn || null,
       time_out: legacyTimeOut || null,
       total_hours: totalHours,
@@ -279,7 +319,7 @@ export default function TimeRecordsPage() {
         </div>
         <div className="flex gap-3">
           <Select options={getMonthOptions()} value={month} onChange={(e) => setMonth(e.target.value)} />
-          <input type="number" value={year} onChange={(e) => setYear(e.target.value)} className="w-28 text-sm border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white" />
+          <input type="number" value={year} onChange={(e) => setYear(e.target.value)} className="w-20 text-sm border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white" />
           <Button
             type="button"
             variant="secondary"
@@ -290,7 +330,9 @@ export default function TimeRecordsPage() {
             title="Export as Excel CSV"
             className="px-3"
           />
-          <Button onClick={openCreate} icon={<Plus size={16} />}>Time Log</Button>
+            <Button onClick={openCreate} icon={<Plus size={16} />} className="md:px-4 px-3">
+            <span className="hidden md:inline">Time Log</span>
+            </Button>
         </div>
       </div>
 
@@ -336,31 +378,57 @@ export default function TimeRecordsPage() {
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? "Edit Time Record" : "Add Time Record"} maxWidth="md">
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <Input label="Date" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required />
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Duty Type</label>
+            <div className="flex gap-3">
+              {(["full", "half_am", "half_pm"] as DutyType[]).map((type) => (
+                <label key={type} className="flex items-center gap-1.5 cursor-pointer text-sm text-slate-700">
+                  <input
+                    type="radio"
+                    name="dutyType"
+                    value={type}
+                    checked={form.dutyType === type}
+                    onChange={() => setForm({ ...form, dutyType: type })}
+                    className="accent-indigo-600"
+                  />
+                  {type === "full" ? "Full Day" : type === "half_am" ? "AM Half Day" : "PM Half Day"}
+                </label>
+              ))}
+            </div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input
-              label="Morning Time In"
-              type="time"
-              value={form.morning_time_in}
-              onChange={(e) => setForm({ ...form, morning_time_in: e.target.value })}
-            />
-            <Input
-              label="Morning Time Out"
-              type="time"
-              value={form.morning_time_out}
-              onChange={(e) => setForm({ ...form, morning_time_out: e.target.value })}
-            />
-            <Input
-              label="Afternoon Time In"
-              type="time"
-              value={form.afternoon_time_in}
-              onChange={(e) => setForm({ ...form, afternoon_time_in: e.target.value })}
-            />
-            <Input
-              label="Afternoon Time Out"
-              type="time"
-              value={form.afternoon_time_out}
-              onChange={(e) => setForm({ ...form, afternoon_time_out: e.target.value })}
-            />
+            {(form.dutyType === "full" || form.dutyType === "half_am") && (
+              <>
+                <Input
+                  label="Morning Time In"
+                  type="time"
+                  value={form.morning_time_in}
+                  onChange={(e) => setForm({ ...form, morning_time_in: e.target.value })}
+                />
+                <Input
+                  label="Morning Time Out"
+                  type="time"
+                  value={form.morning_time_out}
+                  onChange={(e) => setForm({ ...form, morning_time_out: e.target.value })}
+                />
+              </>
+            )}
+            {(form.dutyType === "full" || form.dutyType === "half_pm") && (
+              <>
+                <Input
+                  label="Afternoon Time In"
+                  type="time"
+                  value={form.afternoon_time_in}
+                  onChange={(e) => setForm({ ...form, afternoon_time_in: e.target.value })}
+                />
+                <Input
+                  label="Afternoon Time Out"
+                  type="time"
+                  value={form.afternoon_time_out}
+                  onChange={(e) => setForm({ ...form, afternoon_time_out: e.target.value })}
+                />
+              </>
+            )}
           </div>
           {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
           <div className="flex justify-end gap-2 pt-2">

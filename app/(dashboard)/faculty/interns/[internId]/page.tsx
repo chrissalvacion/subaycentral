@@ -296,6 +296,28 @@ export default function FacultyInternDetailPage() {
     );
   }
 
+  const dailyRenderedHours = Array.from(
+    data.timeRecords.reduce((map, record) => {
+      const dateKey = record.date;
+      const current = map.get(dateKey) ?? 0;
+      map.set(dateKey, Number((current + Number(record.total_hours ?? 0)).toFixed(2)));
+      return map;
+    }, new Map<string, number>())
+  )
+    .map(([date, hours]) => ({ date, hours }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const chartWidth = 760;
+  const chartHeight = 260;
+  const chartPadding = 32;
+  const maxHours = Math.max(1, ...dailyRenderedHours.map((point) => point.hours));
+  const linePoints = dailyRenderedHours.map((point, index, list) => {
+    const x = chartPadding + (index * (chartWidth - chartPadding * 2)) / Math.max(1, list.length - 1);
+    const y = chartHeight - chartPadding - (point.hours / maxHours) * (chartHeight - chartPadding * 2);
+    return { ...point, x, y };
+  });
+  const linePath = linePoints.map((point, index) => `${index === 0 ? "M" : "L"}${point.x} ${point.y}`).join(" ");
+
   return (
     <div className="space-y-6">
       <div className="space-y-3">
@@ -320,6 +342,7 @@ export default function FacultyInternDetailPage() {
         <div className="rounded-lg bg-slate-50 p-4 border border-slate-100">
           <p className="text-slate-400 text-xs uppercase tracking-wide mb-2">Profile</p>
           <p><span className="text-slate-500">Email:</span> {data.profile.email}</p>
+          <p><span className="text-slate-500">Contact Number:</span> {data.profile.phone ?? "—"}</p>
           <p><span className="text-slate-500">Program:</span> {data.profile.program ?? "—"}</p>
           <p><span className="text-slate-500">Section:</span> {data.profile.section ?? "—"}</p>
           <p><span className="text-slate-500">Student ID:</span> {data.profile.student_id ?? "—"}</p>
@@ -342,6 +365,63 @@ export default function FacultyInternDetailPage() {
             <p className="text-slate-500">No deployment record found.</p>
           )}
         </div>
+      </div>
+
+      <div className="rounded-lg bg-white p-4 border border-slate-100 shadow-sm space-y-3">
+        <div>
+          <h2 className="font-semibold text-slate-900">Rendered Hours Fluctuation</h2>
+          <p className="text-sm text-slate-500">Daily total rendered hours from the selected intern's time records</p>
+        </div>
+
+        {dailyRenderedHours.length === 0 ? (
+          <p className="text-sm text-slate-400">No time records available for chart display yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <svg
+              viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+              className="w-full min-w-[700px]"
+              role="img"
+              aria-label="Daily rendered hours chart"
+            >
+              {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
+                const y = chartHeight - chartPadding - tick * (chartHeight - chartPadding * 2);
+                return (
+                  <g key={tick}>
+                    <line x1={chartPadding} y1={y} x2={chartWidth - chartPadding} y2={y} stroke="#e2e8f0" strokeWidth="1" />
+                    <text x={8} y={y + 4} fontSize="11" fill="#64748b">
+                      {(maxHours * tick).toFixed(1)}
+                    </text>
+                  </g>
+                );
+              })}
+
+              <line
+                x1={chartPadding}
+                y1={chartHeight - chartPadding}
+                x2={chartWidth - chartPadding}
+                y2={chartHeight - chartPadding}
+                stroke="#94a3b8"
+                strokeWidth="1"
+              />
+
+              {linePath ? <path d={linePath} fill="none" stroke="#4f46e5" strokeWidth="2.5" /> : null}
+
+              {linePoints.map((point) => (
+                <g key={point.date}>
+                  <circle cx={point.x} cy={point.y} r="3.5" fill="#4f46e5" />
+                  <title>{`${formatDate(point.date)}: ${point.hours} hour(s)`}</title>
+                </g>
+              ))}
+
+              <text x={chartPadding} y={chartHeight - 8} fontSize="11" fill="#64748b">
+                {formatDate(dailyRenderedHours[0].date)}
+              </text>
+              <text x={chartWidth - chartPadding} y={chartHeight - 8} fontSize="11" textAnchor="end" fill="#64748b">
+                {formatDate(dailyRenderedHours[dailyRenderedHours.length - 1].date)}
+              </text>
+            </svg>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-100 shadow-sm">
@@ -407,15 +487,31 @@ export default function FacultyInternDetailPage() {
               {data.timeRecords.length === 0 ? (
                 <p className="text-slate-400">No time records yet.</p>
               ) : (
-                <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden bg-white">
-                  {data.timeRecords.map((record) => (
-                    <div key={record.id} className="flex flex-wrap items-center gap-x-6 gap-y-1 px-4 py-3 text-sm">
-                      <p className="font-medium text-slate-800 min-w-[140px]">{formatDate(record.date)}</p>
-                      <p className="text-slate-600">In: {formatTime(record.time_in)}</p>
-                      <p className="text-slate-600">Out: {formatTime(record.time_out)}</p>
-                      <p className="text-slate-600">Hours: {formatHours(record.total_hours)}</p>
-                    </div>
-                  ))}
+                <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-50 border-b border-slate-100">
+                      <tr>
+                        <th className="text-left px-4 py-3 font-semibold text-slate-600">Date</th>
+                        <th className="text-left px-4 py-3 font-semibold text-slate-600">AM In</th>
+                        <th className="text-left px-4 py-3 font-semibold text-slate-600">AM Out</th>
+                        <th className="text-left px-4 py-3 font-semibold text-slate-600">PM In</th>
+                        <th className="text-left px-4 py-3 font-semibold text-slate-600">PM Out</th>
+                        <th className="text-left px-4 py-3 font-semibold text-slate-600">Total Hours</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {data.timeRecords.map((record) => (
+                        <tr key={record.id} className="hover:bg-slate-50/70">
+                          <td className="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">{formatDate(record.date)}</td>
+                          <td className="px-4 py-3 text-slate-600">{formatTime(record.morning_time_in ?? record.time_in)}</td>
+                          <td className="px-4 py-3 text-slate-600">{formatTime(record.morning_time_out)}</td>
+                          <td className="px-4 py-3 text-slate-600">{formatTime(record.afternoon_time_in)}</td>
+                          <td className="px-4 py-3 text-slate-600">{formatTime(record.afternoon_time_out ?? record.time_out)}</td>
+                          <td className="px-4 py-3 text-slate-600">{formatHours(record.total_hours)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>

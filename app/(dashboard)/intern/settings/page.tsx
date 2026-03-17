@@ -11,7 +11,12 @@ export default function InternSettingsPage() {
   const { profile, refreshProfile } = useAuth();
   const supabase = createClient();
 
-  const [form, setForm] = useState({ full_name: "", phone: "", duty_hours_per_day: "8" });
+  const [form, setForm] = useState({
+    full_name: "",
+    phone: "",
+    duty_hours_per_day: "8",
+    duty_days_per_week: "5",
+  });
   const [pwForm, setPwForm] = useState({ newPw: "", confirm: "" });
   const [saving, setSaving] = useState(false);
   const [dutySaving, setDutySaving] = useState(false);
@@ -27,6 +32,7 @@ export default function InternSettingsPage() {
         full_name: profile.full_name,
         phone: profile.phone ?? "",
         duty_hours_per_day: String(profile.duty_hours_per_day ?? 8),
+        duty_days_per_week: String(profile.duty_days_per_week ?? 5),
       });
     }
   }, [profile]);
@@ -54,8 +60,15 @@ export default function InternSettingsPage() {
   async function handleDutyHoursSave(e: React.FormEvent) {
     e.preventDefault();
     const dutyHoursPerDay = Number(form.duty_hours_per_day);
+    const dutyDaysPerWeek = Number(form.duty_days_per_week);
+
     if (!Number.isFinite(dutyHoursPerDay) || dutyHoursPerDay <= 0) {
       setDutyMsg("Error: Duty hours per day must be greater than 0.");
+      return;
+    }
+
+    if (!Number.isInteger(dutyDaysPerWeek) || dutyDaysPerWeek < 1 || dutyDaysPerWeek > 7) {
+      setDutyMsg("Error: Duty days per week must be a whole number from 1 to 7.");
       return;
     }
 
@@ -64,7 +77,7 @@ export default function InternSettingsPage() {
 
     const { error } = await supabase
       .from("profiles")
-      .update({ duty_hours_per_day: dutyHoursPerDay })
+      .update({ duty_hours_per_day: dutyHoursPerDay, duty_days_per_week: dutyDaysPerWeek })
       .eq("id", profile!.id);
 
     if (error) {
@@ -83,7 +96,8 @@ export default function InternSettingsPage() {
         deployment.start_date,
         deployment.required_hours,
         deployment.rendered_hours,
-        dutyHoursPerDay
+        dutyHoursPerDay,
+        dutyDaysPerWeek
       );
 
       await supabase
@@ -93,7 +107,7 @@ export default function InternSettingsPage() {
     }
 
     await refreshProfile();
-    setDutyMsg("Duty hours updated successfully.");
+    setDutyMsg("Duty settings updated successfully.");
     setDutySaving(false);
   }
 
@@ -193,8 +207,18 @@ export default function InternSettingsPage() {
                     onChange={(e) => setForm({ ...form, duty_hours_per_day: e.target.value })}
                     helperText="Used to estimate your expected end date. Default is 8 hours/day."
                   />
+                  <Input
+                    label="Duty Days Per Week"
+                    type="number"
+                    min="1"
+                    max="7"
+                    step="1"
+                    value={form.duty_days_per_week}
+                    onChange={(e) => setForm({ ...form, duty_days_per_week: e.target.value })}
+                    helperText="Used with duty hours/day to estimate expected end date. Default is 5 days/week."
+                  />
                   {dutyMsg && <p className={`text-sm rounded-lg px-3 py-2 ${dutyMsg.startsWith("Error") ? "bg-red-50 text-red-600" : "bg-green-50 text-green-700"}`}>{dutyMsg}</p>}
-                  <div className="flex justify-end"><Button type="submit" loading={dutySaving}>Save Duty Hours</Button></div>
+                  <div className="flex justify-end"><Button type="submit" loading={dutySaving}>Save Duty Settings</Button></div>
                 </form>
               </>
             ) : (

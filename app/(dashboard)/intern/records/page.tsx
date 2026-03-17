@@ -7,25 +7,68 @@ import { useAuth } from "@/contexts/AuthContext";
 import { DailyRecord } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
+import { Modal } from "@/components/ui/Modal";
+import { Textarea } from "@/components/ui/Textarea";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { getMonthOptions, getCurrentMonthYear, formatDate } from "@/lib/utils";
 import { Plus, ChevronRight, FileDown } from "lucide-react";
 
 type RecordRow = DailyRecord;
+type FormData = {
+  date: string;
+  tasks: string;
+  notes: string;
+};
+
+function getTodayDate() {
+  const now = new Date();
+  const month = `${now.getMonth() + 1}`.padStart(2, "0");
+  const day = `${now.getDate()}`.padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function getMonthRange(year: string, month: string) {
+  const y = Number(year);
+  const m = Number(month);
+
+  if (!Number.isInteger(y) || !Number.isInteger(m) || m < 1 || m > 12) {
+    return null;
+  }
+
+  const start = `${year}-${month.padStart(2, "0")}-01`;
+  const nextMonth = new Date(Date.UTC(y, m, 1));
+  const nextMonthYear = String(nextMonth.getUTCFullYear());
+  const nextMonthValue = String(nextMonth.getUTCMonth() + 1).padStart(2, "0");
+  const endExclusive = `${nextMonthYear}-${nextMonthValue}-01`;
+
+  return { start, endExclusive };
+}
 
 export default function DailyRecordsPage() {
   const supabase = createClient();
   const { profile } = useAuth();
-  const current = getCurrentMonthYear();
 
   const [internDeploymentId, setInternDeploymentId] = useState<string | null>(null);
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [month, setMonth] = useState(current.month);
-  const [year, setYear] = useState(current.year);
+  const [month, setMonth] = useState("");
+  const [year, setYear] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [form, setForm] = useState<FormData>({ date: "", tasks: "", notes: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const current = getCurrentMonthYear();
+    setMonth(current.month);
+    setYear(current.year);
+  }, []);
 
   const load = useCallback(async () => {
-    if (!profile) return;
+    if (!profile || !month || !year) return;
+    const range = getMonthRange(year, month);
+    if (!range) return;
+
     const currentProfile = profile;
     setLoading(true);
     const { data: dep } = await supabase
@@ -47,14 +90,48 @@ export default function DailyRecordsPage() {
       .from("daily_records")
       .select("*")
       .eq("intern_deployment_id", dep.id)
-      .gte("date", `${year}-${month}-01`)
-      .lte("date", `${year}-${month}-31`)
+      .gte("date", range.start)
+      .lt("date", range.endExclusive)
       .order("date", { ascending: false });
     setRecords((data as RecordRow[]) ?? []);
     setLoading(false);
   }, [profile, supabase, month, year]);
 
   useEffect(() => { load(); }, [load]);
+
+  function openCreateModal() {
+    setForm({ date: getTodayDate(), tasks: "", notes: "" });
+    setError(null);
+    setModalOpen(true);
+  }
+
+  async function handleCreateRecord(e: React.FormEvent) {
+    e.preventDefault();
+    if (!profile || !internDeploymentId) return;
+
+    setSaving(true);
+    setError(null);
+
+    const payload = {
+      intern_id: profile.id,
+      intern_deployment_id: internDeploymentId,
+      date: form.date,
+      tasks: form.tasks,
+      notes: form.notes || null,
+    };
+
+    try {
+      const { error: insertError } = await supabase.from("daily_records").insert(payload);
+      if (insertError) throw insertError;
+
+      setModalOpen(false);
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to create daily record");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   function exportAsDocument() {
     if (records.length === 0) return;
@@ -112,7 +189,7 @@ export default function DailyRecordsPage() {
         </div>
         <div className="flex gap-3">
           <Select options={getMonthOptions()} value={month} onChange={(e) => setMonth(e.target.value)} />
-          <input type="number" value={year} onChange={(e) => setYear(e.target.value)} className="w-28 text-sm border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white" />
+          <input type="number" value={year} onChange={(e) => setYear(e.target.value)} className="w-20 text-sm border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white" />
           <Button
             type="button"
             variant="secondary"
@@ -123,9 +200,14 @@ export default function DailyRecordsPage() {
             title="Export as DOC"
             className="px-3"
           />
-          <Link href="/intern/records/new">
-            <Button icon={<Plus size={16} />}>Add Record</Button>
-          </Link>
+          <Button
+            icon={<Plus size={16} />}
+            className="sm:px-4 sm:w-auto"
+            onClick={openCreateModal}
+            disabled={loading || !internDeploymentId}
+          >
+            <span className="hidden sm:inline">Add Record</span>
+          </Button>
         </div>
       </div>
 
@@ -155,6 +237,51 @@ export default function DailyRecordsPage() {
           </>
         )}
       </div>
+
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Add Daily Record" maxWidth="lg">
+        {!internDeploymentId ? (
+          <p className="text-sm text-slate-500">No active deployment found.</p>
+        ) : (
+          <form onSubmit={handleCreateRecord} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
+              <input
+                type="date"
+                value={form.date}
+                onChange={(e) => setForm({ ...form, date: e.target.value })}
+                required
+                className="block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+            </div>
+
+            <Textarea
+              label="Tasks / Accomplishments"
+              value={form.tasks}
+              onChange={(e) => setForm({ ...form, tasks: e.target.value })}
+              rows={7}
+              required
+            />
+
+            <Textarea
+              label="Notes"
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              rows={4}
+            />
+
+            {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
+
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" loading={saving}>
+                Save Record
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
     </div>
   );
 }

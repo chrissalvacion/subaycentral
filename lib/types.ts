@@ -19,6 +19,7 @@ export interface Profile {
   role: UserRole;
   student_id: string | null;
   duty_hours_per_day: number | null;
+  duty_days_per_week: number | null;
   avatar_url: string | null;
   created_at: string;
   updated_at: string;

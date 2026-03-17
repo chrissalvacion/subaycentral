@@ -27,7 +27,7 @@ export default function NewDailyRecordPage() {
   const { profile } = useAuth();
 
   const [internDeploymentId, setInternDeploymentId] = useState<string | null>(null);
-  const [form, setForm] = useState<FormData>({ date: getTodayDate(), tasks: "", notes: "" });
+  const [form, setForm] = useState<FormData>({ date: "", tasks: "", notes: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +49,13 @@ export default function NewDailyRecordPage() {
 
     loadDeployment();
   }, [profile, supabase]);
+
+  useEffect(() => {
+    setForm((current) => {
+      if (current.date) return current;
+      return { ...current, date: getTodayDate() };
+    });
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

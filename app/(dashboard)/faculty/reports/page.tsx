@@ -37,16 +37,21 @@ type DeploymentExportRow = {
 export default function FacultyReportsPage() {
   const supabase = createClient();
   const { profile } = useAuth();
-  const current = getCurrentMonthYear();
 
-  const [month, setMonth] = useState(current.month);
-  const [year, setYear] = useState(current.year);
+  const [month, setMonth] = useState("");
+  const [year, setYear] = useState("");
   const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState<{ name: string; hours: number; dailyCount: number }[]>([]);
+  const [rows, setRows] = useState<{ id: string; name: string; hours: number; dailyCount: number }[]>([]);
   const [deploymentRowsForExport, setDeploymentRowsForExport] = useState<DeploymentExportRow[]>([]);
 
   useEffect(() => {
-    if (!profile) return;
+    const current = getCurrentMonthYear();
+    setMonth(current.month);
+    setYear(current.year);
+  }, []);
+
+  useEffect(() => {
+    if (!profile || !month || !year) return;
     const currentProfile = profile;
     async function load() {
       setLoading(true);
@@ -96,9 +101,10 @@ export default function FacultyReportsPage() {
           .lte("date", `${year}-${month}-31`),
       ]);
 
-      const map = new Map<string, { name: string; hours: number; dailyCount: number }>();
+      const map = new Map<string, { id: string; name: string; hours: number; dailyCount: number }>();
       ((internDeps as InternReportSourceRow[] | null) ?? []).forEach((dep) => {
         map.set(dep.id, {
+          id: dep.id,
           name: dep.profiles?.full_name ?? "Intern",
           hours: 0,
           dailyCount: 0,
@@ -248,7 +254,7 @@ export default function FacultyReportsPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {rows.map((row) => (
-                    <tr key={row.name}>
+                    <tr key={row.id}>
                       <td className="px-4 py-3 font-medium text-slate-900">{row.name}</td>
                       <td className="px-4 py-3 text-slate-600">{formatHours(row.hours)}</td>
                       <td className="px-4 py-3 text-slate-600">{row.dailyCount}</td>

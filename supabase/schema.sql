@@ -31,6 +31,7 @@ CREATE TABLE profiles (
   role        user_role NOT NULL DEFAULT 'intern',
   student_id  TEXT,
   duty_hours_per_day NUMERIC(4, 2) DEFAULT 8,
+  duty_days_per_week SMALLINT DEFAULT 5 CHECK (duty_days_per_week BETWEEN 1 AND 7),
   avatar_url  TEXT,
   created_at  TIMESTAMPTZ DEFAULT NOW(),
   updated_at  TIMESTAMPTZ DEFAULT NOW()

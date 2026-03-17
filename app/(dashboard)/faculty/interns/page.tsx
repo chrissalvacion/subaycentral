@@ -179,7 +179,8 @@ export default function FacultyInternsPage() {
       editForm.startDate || null,
       editingIntern.deployment.required_hours,
       editingIntern.deployment.rendered_hours,
-      dutyHoursPerDay
+      dutyHoursPerDay,
+      editingIntern.intern.duty_days_per_week ?? 5
     );
 
     const { error } = await supabase
@@ -237,7 +238,8 @@ export default function FacultyInternsPage() {
         editForm.startDate || null,
         editingIntern.deployment.required_hours,
         editingIntern.deployment.rendered_hours,
-        editingIntern.intern.duty_hours_per_day ?? 8
+        editingIntern.intern.duty_hours_per_day ?? 8,
+        editingIntern.intern.duty_days_per_week ?? 5
       ) ?? ""
     );
   }, [editForm.startDate, editingIntern]);
@@ -384,8 +386,8 @@ export default function FacultyInternsPage() {
             helperText="Type to search agency and pick from suggestions."
           />
           <datalist id="edit-agency-suggestions">
-            {editAgencySuggestions.map((agencyName) => (
-              <option key={agencyName} value={agencyName} />
+            {editAgencySuggestions.map((agencyName, index) => (
+              <option key={`${agencyName}-${index}`} value={agencyName} />
             ))}
           </datalist>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -230,20 +230,30 @@ export default function FacultyDashboard() {
             )}
           </Card>
 
-          <Card title="Recently Assigned Interns">
+            <Card title="Top 10 Most Recently Assigned Interns">
             {recentInterns.length === 0 ? (
               <p className="text-slate-400 text-sm">No interns assigned yet.</p>
             ) : (
-              <div className="divide-y divide-slate-100">
-                {recentInterns.map((intern) => (
-                  <div key={intern.id} className="py-3 first:pt-0 last:pb-0">
-                    <p className="font-medium text-slate-900">{intern.full_name}</p>
-                    <p className="text-sm text-slate-500">{intern.email}</p>
-                  </div>
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                <tr className="border-b border-slate-100">
+                  <th className="text-left px-3 py-2 font-semibold text-slate-600">Name</th>
+                  <th className="text-left px-3 py-2 font-semibold text-slate-600">Email</th>
+                </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                {recentInterns.slice(0, 10).map((intern) => (
+                  <tr key={intern.id}>
+                  <td className="px-3 py-2 font-medium text-slate-900">{intern.full_name}</td>
+                  <td className="px-3 py-2 text-slate-600">{intern.email}</td>
+                  </tr>
                 ))}
+                </tbody>
+              </table>
               </div>
             )}
-          </Card>
+            </Card>
         </>
       )}
     </div>

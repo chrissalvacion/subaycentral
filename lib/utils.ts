@@ -11,11 +11,39 @@ export function cn(...inputs: ClassValue[]) {
 
 export function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "—";
-  return new Date(dateStr).toLocaleDateString("en-PH", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+
+  const monthNames = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+
+  const dateOnlyMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnlyMatch) {
+    const year = Number(dateOnlyMatch[1]);
+    const monthIndex = Number(dateOnlyMatch[2]) - 1;
+    const day = Number(dateOnlyMatch[3]);
+    if (monthIndex >= 0 && monthIndex < 12 && day >= 1 && day <= 31) {
+      return `${monthNames[monthIndex]} ${day}, ${year}`;
+    }
+  }
+
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+
+  const year = date.getUTCFullYear();
+  const monthIndex = date.getUTCMonth();
+  const day = date.getUTCDate();
+  return `${monthNames[monthIndex]} ${day}, ${year}`;
 }
 
 export function formatTime(timeStr: string | null | undefined): string {
@@ -38,13 +66,25 @@ export function getProgressPercent(rendered: number, required: number): number {
 }
 
 export function getMonthOptions() {
-  return Array.from({ length: 12 }, (_, i) => {
-    const d = new Date(2024, i, 1);
-    return {
-      value: String(i + 1).padStart(2, "0"),
-      label: d.toLocaleString("en-PH", { month: "long" }),
-    };
-  });
+  const monthNames = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+
+  return monthNames.map((label, index) => ({
+    value: String(index + 1).padStart(2, "0"),
+    label,
+  }));
 }
 
 export function getCurrentMonthYear() {
@@ -59,21 +99,33 @@ export function calculateExpectedEndDate(
   startDate: string | null | undefined,
   requiredHours: number | null | undefined,
   renderedHours: number | null | undefined,
-  dutyHoursPerDay: number | null | undefined
+  dutyHoursPerDay: number | null | undefined,
+  dutyDaysPerWeek?: number | null | undefined
 ): string | null {
   if (!startDate) return null;
 
   const required = Number(requiredHours ?? 0);
   const rendered = Number(renderedHours ?? 0);
   const dutyHours = Number(dutyHoursPerDay ?? 8);
+  const daysPerWeek = Number(dutyDaysPerWeek ?? 5);
   const safeDutyHours = dutyHours > 0 ? dutyHours : 8;
+  const safeDutyDaysPerWeek = Math.max(1, Math.min(7, Math.floor(daysPerWeek) || 5));
 
   const remainingHours = Math.max(0, required - rendered);
-  const daysNeeded = Math.ceil(remainingHours / safeDutyHours);
+  const dutyDaysNeeded = Math.ceil(remainingHours / safeDutyHours);
 
   const start = new Date(`${startDate}T00:00:00`);
   if (Number.isNaN(start.getTime())) return null;
 
-  start.setDate(start.getDate() + Math.max(0, daysNeeded - 1));
+  if (dutyDaysNeeded <= 1) {
+    return start.toISOString().slice(0, 10);
+  }
+
+  const additionalDutyDays = dutyDaysNeeded - 1;
+  const fullWeeks = Math.floor(additionalDutyDays / safeDutyDaysPerWeek);
+  const remainingDutyDays = additionalDutyDays % safeDutyDaysPerWeek;
+  const calendarDaysToAdd = fullWeeks * 7 + remainingDutyDays;
+
+  start.setDate(start.getDate() + calendarDaysToAdd);
   return start.toISOString().slice(0, 10);
 }

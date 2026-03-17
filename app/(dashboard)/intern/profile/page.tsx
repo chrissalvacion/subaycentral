@@ -58,7 +58,8 @@ export default function InternProfilePage() {
         dep?.start_date ?? null,
         requiredHours,
         renderedHours,
-        currentProfile.duty_hours_per_day ?? 8
+        currentProfile.duty_hours_per_day ?? 8,
+        currentProfile.duty_days_per_week ?? 5
       );
 
       setData({

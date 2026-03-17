@@ -29,9 +29,9 @@ export function Header({ onMenuClick, title }: HeaderProps) {
       )}
 
       <div className="ml-auto flex items-center gap-2">
-        <button className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors">
+        {/* <button className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors">
           <Bell size={18} />
-        </button>
+        </button> */}
         <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center">
           <span className="text-white text-xs font-semibold">
             {profile?.full_name?.[0]?.toUpperCase() ?? "U"}

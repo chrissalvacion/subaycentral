@@ -9,11 +9,9 @@ import { Deployment, InternDeployment, PartnerAgency, Profile } from "@/lib/type
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { Select } from "@/components/ui/Select";
 import { calculateExpectedEndDate, formatDate } from "@/lib/utils";
-import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
-import { enrollAssignedIntern } from "./actions";
 
 type EnrollmentRow = InternDeployment & {
   profiles?: Profile | null;
@@ -30,24 +28,8 @@ type EnrollmentForm = {
   startDate: string;
 };
 
-function normalizeValue(value: string | null | undefined) {
-  return (value ?? "").trim().toLowerCase();
-}
-
-function normalizeProgram(value: string | null | undefined) {
-  const normalized = normalizeValue(value);
-  if (normalized === "bsit" || normalized === "bs information technology") {
-    return "bs information technology";
-  }
-  if (normalized === "bsis" || normalized === "bs information systems") {
-    return "bs information systems";
-  }
-  return normalized;
-}
-
 export default function FacultyDeploymentDetailPage() {
   const supabase = createClient();
-  const { profile } = useAuth();
   const params = useParams<{ deploymentId: string }>();
   const deploymentId = params?.deploymentId;
 
@@ -108,29 +90,15 @@ export default function FacultyDeploymentDetailPage() {
     async function loadAssignedInterns() {
       setLoadingAvailableInterns(true);
 
-      if (!profile?.program || !profile?.section) {
-        setAssignedInterns([]);
-        setAgencyAssignedInternIds([]);
-        setLoadingAvailableInterns(false);
-        return;
-      }
-
       const { data } = await supabase
         .from("profiles")
         .select("*")
         .eq("role", "intern")
         .order("full_name", { ascending: true });
 
-      const facultyProgram = normalizeProgram(profile.program);
-      const facultySection = normalizeValue(profile.section);
-      const scoped = ((data as Profile[] | null) ?? []).filter((intern) => {
-        return (
-          normalizeProgram(intern.program) === facultyProgram &&
-          normalizeValue(intern.section) === facultySection
-        );
-      });
+      const allInterns = (data as Profile[] | null) ?? [];
 
-      if (scoped.length === 0) {
+      if (allInterns.length === 0) {
         setAssignedInterns([]);
         setAgencyAssignedInternIds([]);
         setLoadingAvailableInterns(false);
@@ -140,13 +108,10 @@ export default function FacultyDeploymentDetailPage() {
       const { data: agencyAssignedRows } = await supabase
         .from("intern_deployments")
         .select("intern_id")
-        .in(
-          "intern_id",
-          scoped.map((intern) => intern.id)
-        )
+        .in("intern_id", allInterns.map((intern) => intern.id))
         .not("agency_id", "is", null);
 
-      setAssignedInterns(scoped);
+      setAssignedInterns(allInterns);
       setAgencyAssignedInternIds(
         Array.from(
           new Set(
@@ -160,7 +125,7 @@ export default function FacultyDeploymentDetailPage() {
     }
 
     loadAssignedInterns();
-  }, [profile, supabase]);
+  }, [supabase]);
 
   function openEnrollModal() {
     const today = new Date().toISOString().slice(0, 10);
@@ -197,25 +162,30 @@ export default function FacultyDeploymentDetailPage() {
       return;
     }
 
-    const selectedIntern = assignedInterns.find((intern) => intern.id === enrollmentForm.internId);
+    const selectedIntern = availableInterns.find((intern) => intern.id === enrollmentForm.internId);
     const dutyHoursPerDay = selectedIntern?.duty_hours_per_day ?? 8;
+    const dutyDaysPerWeek = selectedIntern?.duty_days_per_week ?? 5;
     const expectedEndDate = calculateExpectedEndDate(
       enrollmentForm.startDate,
       deployment.required_hours,
       0,
-      dutyHoursPerDay
+      dutyHoursPerDay,
+      dutyDaysPerWeek
     );
 
-    const result = await enrollAssignedIntern({
-      deploymentId: deployment.id,
-      internId: enrollmentForm.internId,
-      agencyId: enrollmentForm.agencyId,
-      startDate: enrollmentForm.startDate,
-      expectedEndDate,
+    const { error } = await supabase.from("intern_deployments").insert({
+      intern_id: enrollmentForm.internId,
+      deployment_id: deployment.id,
+      agency_id: enrollmentForm.agencyId,
+      start_date: enrollmentForm.startDate,
+      expected_end_date: expectedEndDate,
+      required_hours: deployment.required_hours,
+      status: "active",
+      rendered_hours: 0,
     });
 
-    if (result.error) {
-      alert(result.error);
+    if (error) {
+      alert(error.message);
       setSavingEnrollment(false);
       return;
     }
@@ -329,6 +299,11 @@ export default function FacultyDeploymentDetailPage() {
     }));
   }, [agencies]);
 
+  const canSaveEnrollment =
+    Boolean(enrollmentForm.internId) &&
+    Boolean(enrollmentForm.agencyId) &&
+    Boolean(enrollmentForm.startDate);
+
   const noAvailableInterns = !loadingAvailableInterns && availableInterns.length === 0;
 
   return (
@@ -352,14 +327,14 @@ export default function FacultyDeploymentDetailPage() {
           <Button
             icon={<PlusCircle size={14} />}
             onClick={openEnrollModal}
-            disabled={loadingAvailableInterns || !profile?.program || !profile?.section || noAvailableInterns}
+            disabled={loadingAvailableInterns || noAvailableInterns}
           >
             Enroll Available Student
           </Button>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+      {/* <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100">
           <h2 className="font-semibold text-slate-900">Program and Section Interns</h2>
           <p className="text-sm text-slate-500 mt-1">
@@ -410,7 +385,7 @@ export default function FacultyDeploymentDetailPage() {
             </table>
           </div>
         )}
-      </div>
+      </div> */}
 
       <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 md:p-5 space-y-4">
         <div className="relative">
@@ -504,7 +479,7 @@ export default function FacultyDeploymentDetailPage() {
       >
         <div className="space-y-5">
           <p className="text-sm text-slate-500">
-            Enroll students assigned to your faculty section into this deployment.
+            Enroll interns who are not yet assigned to any agency.
           </p>
 
           <div className="space-y-4">
@@ -517,14 +492,14 @@ export default function FacultyDeploymentDetailPage() {
               disabled={noAvailableInterns}
             />
             <datalist id="intern-suggestions">
-              {internOptions.map((option, index) => (
-                <option key={`${option.value}-${index}`} value={option.label} />
+              {internOptions.map((option) => (
+                <option key={option.value} value={option.label} />
               ))}
             </datalist>
             <p className="text-xs text-slate-500 -mt-2">
               {noAvailableInterns
-                ? "No available interns to enroll right now."
-                : "Type to search. Suggestions show only interns in your program and section with no agency assignment."}
+                ? "No interns available. All interns already have agency assignments."
+                : "Type to search. Suggestions show only interns with no agency assignment."}
             </p>
 
             <Select
@@ -549,7 +524,7 @@ export default function FacultyDeploymentDetailPage() {
           </div>
 
           <div className="flex justify-end">
-            <Button onClick={saveEnrollment} loading={savingEnrollment} disabled={noAvailableInterns}>
+            <Button onClick={saveEnrollment} loading={savingEnrollment} disabled={!canSaveEnrollment || noAvailableInterns}>
               Save Enrollment
             </Button>
           </div>
