@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
@@ -261,6 +262,15 @@ export default function LoginPage() {
             Sign In
           </Button>
 
+          <div className="text-right -mt-1">
+            <Link
+              href="/forgot-password"
+              className="text-xs text-indigo-600 hover:text-indigo-700"
+            >
+              Forgot your password?
+            </Link>
+          </div>
+
           <Button
             type="button"
             variant="outline"
@@ -275,7 +285,7 @@ export default function LoginPage() {
         </form>
 
         <p className="text-center text-xs text-slate-400 mt-6">
-          Contact your administrator if you need to reset your account's password.
+          Check your email verification first if you just created an account.
         </p>
       </div>
 

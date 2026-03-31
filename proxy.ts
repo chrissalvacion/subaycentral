@@ -30,6 +30,8 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
+  const publicPaths = ["/login", "/forgot-password", "/reset-password"];
+  const isPublicPath = publicPaths.includes(pathname);
 
   if (
     pathname.startsWith("/_next") ||
@@ -39,7 +41,7 @@ export async function proxy(request: NextRequest) {
     return supabaseResponse;
   }
 
-  if (!user && pathname !== "/login") {
+  if (!user && !isPublicPath) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
