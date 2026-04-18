@@ -221,20 +221,27 @@ BEGIN
     section,
     student_id,
     email,
+    phone,
+    duty_hours_per_day,
+    duty_days_per_week,
     role
   )
   VALUES (
     NEW.id,
     resolved_full_name,
-    NEW.raw_user_meta_data->>'first_name',
-    NEW.raw_user_meta_data->>'middle_name',
-    NEW.raw_user_meta_data->>'last_name',
-    NEW.raw_user_meta_data->>'program',
-    NEW.raw_user_meta_data->>'section',
-    NEW.raw_user_meta_data->>'student_id',
+    NULLIF(TRIM(COALESCE(NEW.raw_user_meta_data->>'first_name',  '')), ''),
+    NULLIF(TRIM(COALESCE(NEW.raw_user_meta_data->>'middle_name', '')), ''),
+    NULLIF(TRIM(COALESCE(NEW.raw_user_meta_data->>'last_name',   '')), ''),
+    NULLIF(TRIM(COALESCE(NEW.raw_user_meta_data->>'program',     '')), ''),
+    NULLIF(TRIM(COALESCE(NEW.raw_user_meta_data->>'section',     '')), ''),
+    NULLIF(TRIM(COALESCE(NEW.raw_user_meta_data->>'student_id',  '')), ''),
     NEW.email,
+    NULLIF(TRIM(COALESCE(NEW.raw_user_meta_data->>'phone',       '')), ''),
+    8,
+    5,
     resolved_role
-  );
+  )
+  ON CONFLICT (id) DO NOTHING;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -300,7 +307,7 @@ ALTER TABLE feedback           ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Own profile readable"          ON profiles FOR SELECT USING (id = auth.uid());
 CREATE POLICY "Admin reads all profiles"      ON profiles FOR SELECT USING (get_current_user_role() = 'admin');
 CREATE POLICY "Admin inserts profiles"        ON profiles FOR INSERT WITH CHECK (get_current_user_role() = 'admin');
-CREATE POLICY "Admin updates profiles"        ON profiles FOR UPDATE USING (get_current_user_role() = 'admin');
+CREATE POLICY "Admin updates profiles"        ON profiles FOR UPDATE USING (get_current_user_role() = 'admin') WITH CHECK (get_current_user_role() = 'admin');
 CREATE POLICY "Admin deletes profiles"        ON profiles FOR DELETE USING (get_current_user_role() = 'admin');
 CREATE POLICY "User updates own profile"      ON profiles FOR UPDATE USING (id = auth.uid());
 CREATE POLICY "Faculty reads assigned interns" ON profiles FOR SELECT USING (

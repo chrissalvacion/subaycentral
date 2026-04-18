@@ -57,7 +57,7 @@ function computeRangeHours(timeIn: string, timeOut: string) {
   const outDate = new Date(`1970-01-01T${timeOut}:00`);
   const diffMs = outDate.getTime() - inDate.getTime();
   if (diffMs <= 0) return -1;
-  return Math.floor(diffMs / (1000 * 60 * 60));
+  return diffMs / (1000 * 60 * 60); // decimal hours (e.g. 4.75 = 4h 45m)
 }
 
 export default function TimeRecordsPage() {
@@ -135,9 +135,9 @@ export default function TimeRecordsPage() {
     const renderedHoursFromLogs = Number(
       (deploymentTimeRows ?? []).reduce(
         (sum: number, row: { total_hours: number | null }) =>
-          sum + Math.floor(Number(row.total_hours ?? 0)),
+          sum + Number(row.total_hours ?? 0),
         0
-      )
+      ).toFixed(2)
     );
 
     const expectedEndDate = calculateExpectedEndDate(
@@ -430,6 +430,25 @@ export default function TimeRecordsPage() {
               </>
             )}
           </div>
+          {(() => {
+            const showMorningPreview = form.dutyType === "full" || form.dutyType === "half_am";
+            const showAfternoonPreview = form.dutyType === "full" || form.dutyType === "half_pm";
+            const morningH = showMorningPreview ? computeRangeHours(form.morning_time_in, form.morning_time_out) : 0;
+            const afternoonH = showAfternoonPreview ? computeRangeHours(form.afternoon_time_in, form.afternoon_time_out) : 0;
+            const previewTotal = (morningH > 0 ? morningH : 0) + (afternoonH > 0 ? afternoonH : 0);
+            const hasEnoughData =
+              (showMorningPreview ? form.morning_time_in && form.morning_time_out : true) ||
+              (showAfternoonPreview ? form.afternoon_time_in && form.afternoon_time_out : true);
+            if (!hasEnoughData) return null;
+            return (
+              <div className="flex items-center justify-between rounded-lg bg-indigo-50 border border-indigo-100 px-4 py-2.5">
+                <span className="text-sm font-medium text-indigo-700">Calculated Total Hours</span>
+                <span className="text-base font-bold text-indigo-900">
+                  {previewTotal > 0 ? `${previewTotal.toFixed(2)} hrs` : "—"}
+                </span>
+              </div>
+            );
+          })()}
           {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
           <div className="flex justify-end gap-2 pt-2">
             {editing && (

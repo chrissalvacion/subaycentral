@@ -15,7 +15,7 @@ export async function createAccount(data: {
   full_name: string;
   email: string;
   password: string;
-  role: "faculty" | "intern";
+  role: "admin" | "faculty" | "intern";
   phone?: string;
   student_id?: string;
   program?: string;
@@ -36,24 +36,45 @@ export async function createAccount(data: {
     user_metadata: {
       full_name: data.full_name,
       role: data.role,
-      program: data.program,
-      section: data.section,
+      // Include all optional fields so the DB trigger can populate the
+      // profile row fully without relying on column DEFAULTs for text fields.
+      phone: data.phone ?? null,
+      student_id: data.student_id ?? null,
+      program: data.program ?? null,
+      section: data.section ?? null,
     },
   });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    // Surface a clearer message for the most common trigger-failure case.
+    if (error.message.toLowerCase().includes("database error")) {
+      throw new Error(
+        "Account creation failed due to a database error. " +
+          "This is usually caused by an outdated database trigger. " +
+          "Please run the migration in supabase/20260331_fix_handle_new_user_trigger.sql " +
+          "via the Supabase SQL Editor and try again."
+      );
+    }
+    throw new Error(error.message);
+  }
 
-  // Patch extra fields into profile
-  if (created.user && (data.phone || data.student_id || data.program || data.section)) {
+  // Upsert extra profile fields that may not have been set by the trigger.
+  if (created.user) {
     await admin
       .from("profiles")
-      .update({
-        phone: data.phone ?? null,
-        student_id: data.student_id ?? null,
-        program: data.program ?? null,
-        section: data.section ?? null,
-      })
-      .eq("id", created.user.id);
+      .upsert(
+        {
+          id: created.user.id,
+          full_name: data.full_name,
+          email: data.email,
+          role: data.role,
+          phone: data.phone ?? null,
+          student_id: data.student_id ?? null,
+          program: data.program ?? null,
+          section: data.section ?? null,
+        },
+        { onConflict: "id", ignoreDuplicates: false }
+      );
   }
 
   revalidatePath("/admin/accounts");
@@ -65,7 +86,7 @@ export async function updateAccount(
   data: {
     full_name?: string;
     email?: string;
-    role?: "faculty" | "intern";
+    role?: "admin" | "faculty" | "intern";
     password?: string;
     phone?: string;
     student_id?: string | null;
@@ -86,6 +107,24 @@ export async function updateAccount(
   const admin = createAdminClient();
   const { password, ...profileData } = data;
 
+  const normalizedProfileData = {
+    ...profileData,
+    student_id:
+      data.role === "intern"
+        ? data.student_id ?? null
+        : data.student_id === undefined
+          ? undefined
+          : null,
+    program:
+      data.role === "admin"
+        ? null
+        : data.program,
+    section:
+      data.role === "admin"
+        ? null
+        : data.section,
+  };
+
   if (data.email || password || data.full_name || data.role) {
     const { error: userError } = await admin.auth.admin.updateUserById(userId, {
       email: data.email,
@@ -101,7 +140,7 @@ export async function updateAccount(
 
   const { error } = await admin
     .from("profiles")
-    .update(profileData)
+    .update(normalizedProfileData)
     .eq("id", userId);
   if (error) throw new Error(error.message);
   revalidatePath("/admin/accounts");

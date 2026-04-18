@@ -19,6 +19,7 @@ import {
 import { Plus, Search, MoreVertical } from "lucide-react";
 
 const ROLE_OPTIONS = [
+  { value: "admin", label: "Admin" },
   { value: "faculty", label: "Faculty" },
   { value: "intern", label: "Intern" },
 ];
@@ -27,7 +28,7 @@ type FormData = {
   full_name: string;
   email: string;
   password: string;
-  role: "faculty" | "intern";
+  role: "admin" | "faculty" | "intern";
   phone: string;
   student_id: string;
   program: string;
@@ -38,7 +39,7 @@ const defaultForm: FormData = {
   full_name: "",
   email: "",
   password: "",
-  role: "intern",
+  role: "faculty",
   phone: "",
   student_id: "",
   program: "",
@@ -52,7 +53,7 @@ export default function AccountsPage() {
   const [filtered, setFiltered] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<"faculty" | "intern">("faculty");
+  const [activeTab, setActiveTab] = useState<"admin" | "faculty" | "intern">("faculty");
   const [pageSize, setPageSize] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
@@ -67,7 +68,7 @@ export default function AccountsPage() {
       supabase
         .from("profiles")
         .select("*")
-        .in("role", ["faculty", "intern"])
+        .in("role", ["admin", "faculty", "intern"])
         .order("created_at", { ascending: false }),
       supabase
         .from("programs")
@@ -118,7 +119,7 @@ export default function AccountsPage() {
       full_name: profile.full_name,
       email: profile.email,
       password: "",
-      role: profile.role as "faculty" | "intern",
+      role: profile.role as "admin" | "faculty" | "intern",
       phone: profile.phone ?? "",
       student_id: profile.student_id ?? "",
       program: profile.program ?? "",
@@ -147,8 +148,8 @@ export default function AccountsPage() {
           password: form.password || undefined,
           phone: form.phone || undefined,
           student_id: form.role === "intern" ? form.student_id || null : null,
-          program: form.program || null,
-          section: form.section || null,
+          program: form.role === "admin" ? null : form.program || null,
+          section: form.role === "admin" ? null : form.section || null,
         });
       } else {
         if (!form.password || form.password.length < 6) {
@@ -162,9 +163,9 @@ export default function AccountsPage() {
           password: form.password,
           role: form.role,
           phone: form.phone || undefined,
-          student_id: form.student_id || undefined,
-          program: form.program || undefined,
-          section: form.section || undefined,
+          student_id: form.role === "intern" ? form.student_id || undefined : undefined,
+          program: form.role === "admin" ? undefined : form.program || undefined,
+          section: form.role === "admin" ? undefined : form.section || undefined,
         });
       }
       await fetchProfiles();
@@ -201,6 +202,7 @@ export default function AccountsPage() {
     }
   }
 
+  const adminCount = profiles.filter((p) => p.role === "admin").length;
   const facultyCount = profiles.filter((p) => p.role === "faculty").length;
   const internCount = profiles.filter((p) => p.role === "intern").length;
 
@@ -225,7 +227,7 @@ export default function AccountsPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Account Management</h1>
           <p className="text-slate-500 text-sm">
-            Manage faculty and intern accounts
+            Manage admin, faculty, and intern accounts
           </p>
         </div>
         <Button onClick={openCreate} icon={<Plus size={16} />}>
@@ -235,6 +237,18 @@ export default function AccountsPage() {
 
       {/* Tabs */}
       <div className="flex items-center gap-2 border-b border-slate-200">
+        <button
+          type="button"
+          onClick={() => setActiveTab("admin")}
+          className={[
+            "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+            activeTab === "admin"
+              ? "border-indigo-600 text-indigo-700"
+              : "border-transparent text-slate-500 hover:text-slate-700",
+          ].join(" ")}
+        >
+          Admin ({adminCount})
+        </button>
         <button
           type="button"
           onClick={() => setActiveTab("faculty")}
@@ -480,7 +494,7 @@ export default function AccountsPage() {
             label="Role"
             value={form.role}
             onChange={(e) =>
-              setForm({ ...form, role: e.target.value as "faculty" | "intern" })
+              setForm({ ...form, role: e.target.value as "admin" | "faculty" | "intern" })
             }
             options={ROLE_OPTIONS}
           />

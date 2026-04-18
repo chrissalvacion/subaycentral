@@ -3,6 +3,8 @@ import path from "path";
 
 type Primitive = string | number | null;
 
+const isSqliteMode = process.env.DEV_DB === "sqlite";
+
 type Filter =
   | { op: "eq"; column: string; value: Primitive }
   | { op: "in"; column: string; values: Primitive[] }
@@ -10,7 +12,12 @@ type Filter =
   | { op: "lte"; column: string; value: Primitive };
 
 const dbPath = path.join(process.cwd(), "dev.sqlite");
-const db = new Database(dbPath);
+// Only open the database file when running in SQLite dev mode.
+// In production (Vercel), the filesystem is read-only and better-sqlite3
+// must never try to create/open a file at module load time.
+const db: Database.Database = isSqliteMode
+  ? new Database(dbPath)
+  : (null as unknown as Database.Database);
 
 let initialized = false;
 
@@ -544,7 +551,7 @@ export function createProfile(input: {
   full_name: string;
   email: string;
   password: string;
-  role: "faculty" | "intern";
+  role: "admin" | "faculty" | "intern";
   first_name?: string;
   middle_name?: string;
   last_name?: string;
@@ -583,7 +590,7 @@ export function updateProfile(
   data: {
     full_name?: string;
     email?: string;
-    role?: "faculty" | "intern";
+    role?: "admin" | "faculty" | "intern";
     phone?: string;
     student_id?: string | null;
     program?: string | null;
